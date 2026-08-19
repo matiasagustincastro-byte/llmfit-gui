@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLM Fit — ¿Qué corre en mi GPU?</title>
+<style>
+  :root{
+    --bg:#0b0f17; --panel:#121826; --panel2:#0e1420; --line:#1f2937;
+    --txt:#e6edf7; --dim:#8b9bb4; --dim2:#5f7189;
+    --ok:#2fd47f; --good:#7fd44a; --warn:#f0b429; --bad:#f0556a; --acc:#3fa9f5;
+    --mono:"JetBrains Mono",ui-monospace,"Cascadia Code",Consolas,monospace;
+    --sans:"Segoe UI",system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:14px}
+  a{color:var(--acc)}
+
+  /* ---------- topbar ---------- */
+  .top{display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+       padding:14px 20px;background:var(--panel);border-bottom:1px solid var(--line)}
+  .brand{font-size:18px;font-weight:650;letter-spacing:-.2px}
+  .brand small{display:block;font-size:11px;font-weight:400;color:var(--dim2);letter-spacing:.6px;text-transform:uppercase}
+  .spacer{flex:1}
+  .pill{font-family:var(--mono);font-size:11px;padding:3px 9px;border-radius:999px;
+        border:1px solid var(--line);color:var(--dim);white-space:nowrap}
+  .pill.live{border-color:#1c4a34;color:var(--ok)}
+  .pill.dead{border-color:#4a1c24;color:var(--bad)}
+
+  /* ---------- gpu strip ---------- */
+  .gpu{display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr;gap:1px;
+       background:var(--line);border-bottom:1px solid var(--line)}
+  .gpu .cell{background:var(--panel2);padding:12px 20px;min-width:0}
+  .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--dim2);margin-bottom:5px}
+  .val{font-family:var(--mono);font-size:15px;font-weight:600}
+  .val .u{font-size:11px;color:var(--dim);font-weight:400}
+  .bar{height:7px;border-radius:4px;background:#1a2434;overflow:hidden;margin-top:8px;display:flex}
+  .bar i{display:block;height:100%}
+  .bar .used{background:linear-gradient(90deg,#f0b429,#f0556a)}
+  .bar .budget{background:var(--acc);opacity:.55}
+  .sub{font-family:var(--mono);font-size:10.5px;color:var(--dim2);margin-top:6px}
+
+  /* ---------- controls ---------- */
+  .ctrl{display:flex;flex-wrap:wrap;gap:14px;padding:14px 20px;
+        background:var(--panel);border-bottom:1px solid var(--line);align-items:flex-end}
+  .f{display:flex;flex-direction:column;gap:5px}
+  .f label{font-size:10px;text-transform:uppercase;letter-spacing:.7px;color:var(--dim2)}
+  select,input{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    padding:7px 9px;border-radius:6px;font-family:var(--sans);font-size:13px;outline:none}
+  select:focus,input:focus{border-color:var(--acc)}
+  input[type=number]{width:100px;font-family:var(--mono)}
+  #q{width:230px}
+  button{background:var(--acc);color:#04121f;border:0;padding:8px 15px;border-radius:6px;
+    font-weight:650;font-size:13px;cursor:pointer;font-family:var(--sans)}
+  button:hover{filter:brightness(1.12)}
+  button.ghost{background:transparent;border:1px solid var(--line);color:var(--dim)}
+  .chk{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--dim);padding-bottom:8px}
+  .chk input{width:15px;height:15px;accent-color:var(--acc)}
+
+  /* ---------- layout ---------- */
+  .main{display:grid;grid-template-columns:1fr 400px;gap:1px;background:var(--line);
+        height:calc(100vh - 210px);min-height:340px}
+  .list,.side{background:var(--bg);overflow:auto;min-width:0}
+  .side{background:var(--panel2);padding:18px}
+
+  /* ---------- table ---------- */
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  thead th{position:sticky;top:0;background:var(--panel);z-index:2;text-align:left;
+    padding:9px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.7px;
+    color:var(--dim2);border-bottom:1px solid var(--line);white-space:nowrap}
+  tbody td{padding:9px 10px;border-bottom:1px solid #151c29;vertical-align:middle}
+  tbody tr{cursor:pointer}
+  tbody tr:hover{background:#141c2b}
+  tbody tr.sel{background:#152234;box-shadow:inset 2px 0 0 var(--acc)}
+  .name{font-weight:550;max-width:330px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .prov{font-size:11px;color:var(--dim2)}
+  .num{font-family:var(--mono);text-align:right;white-space:nowrap}
+  .tag{display:inline-block;font-family:var(--mono);font-size:10px;padding:2px 6px;
+       border-radius:4px;background:#1a2434;color:var(--dim)}
+  .st{font-weight:650;white-space:nowrap;font-size:12.5px}
+  .st.ok{color:var(--ok)} .st.good{color:var(--good)}
+  .st.warn{color:var(--warn)} .st.bad{color:var(--bad)}
+  .meter{width:62px;height:5px;border-radius:3px;background:#1a2434;overflow:hidden;margin-top:4px}
+  .meter i{display:block;height:100%}
+
+  /* ---------- side panel ---------- */
+  .side h2{margin:0 0 3px;font-size:15px;word-break:break-word;line-height:1.35}
+  .side .who{font-size:11.5px;color:var(--dim2);margin-bottom:14px}
+  .kv{display:grid;grid-template-columns:1fr 1fr;gap:11px;margin:14px 0}
+  .kv div .lbl{margin-bottom:3px}
+  .kv div .v{font-family:var(--mono);font-size:13.5px}
+  h3.sec{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--dim2);
+    margin:20px 0 9px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+  .row{display:flex;justify-content:space-between;gap:10px;font-family:var(--mono);
+       font-size:12px;padding:4px 0;color:var(--dim)}
+  .row b{color:var(--txt);font-weight:600}
+  ul.notes{margin:0;padding-left:16px;font-size:12px;color:var(--dim);line-height:1.65}
+  .empty{color:var(--dim2);text-align:center;padding:60px 20px;font-size:13px;line-height:1.7}
+  .err{background:#2a1218;border:1px solid #4a1c24;color:#ff9aa8;
+       padding:11px 13px;border-radius:7px;font-size:12.5px;margin:14px 20px;line-height:1.6}
+  .cmd{font-family:var(--mono);font-size:11px;background:#0a0f18;border:1px solid var(--line);
+       padding:8px 10px;border-radius:6px;color:var(--dim);word-break:break-all;margin-top:6px}
+  @media(max-width:1100px){.main{grid-template-columns:1fr;height:auto}
+    .gpu{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div class="brand">¿Qué corre en mi GPU?<small>llmfit · análisis local de hardware</small></div>
+  <div class="spacer"></div>
+  <span class="pill" id="p-node">—</span>
+  <span class="pill" id="p-cat">—</span>
+  <span class="pill" id="p-back">backend…</span>
+</div>
+
+<div class="gpu" id="gpustrip"></div>
+
+<div class="ctrl">
+  <div class="f"><label>Presupuesto de VRAM</label>
+    <select id="budget">
+      <option value="free">VRAM libre ahora (real)</option>
+      <option value="total" selected>VRAM total de la GPU</option>
+      <option value="manual">Manual…</option>
+    </select></div>
+  <div class="f" id="wrap-manual" style="display:none"><label>GB</label>
+    <input type="number" id="vram" min="1" max="512" step="0.5" value="8"></div>
+  <div class="f"><label>Contexto</label>
+    <select id="ctx">
+      <option value="">Por defecto (8K)</option>
+      <option value="2048">2K</option><option value="4096">4K</option>
+      <option value="8192">8K</option><option value="16384">16K</option>
+      <option value="32768">32K</option><option value="65536">64K</option>
+      <option value="131072">128K</option>
+    </select></div>
+  <div class="f"><label>Ajuste mínimo</label>
+    <select id="minfit">
+      <option value="">Todos</option>
+      <option value="marginal" selected>Ejecutable (marginal+)</option>
+      <option value="good">Bueno o mejor</option>
+      <option value="perfect">Solo perfecto</option>
+    </select></div>
+  <div class="f"><label>Runtime</label>
+    <select id="rt"><option value="">Cualquiera</option>
+      <option value="llama.cpp">llama.cpp</option><option value="vllm">vLLM</option></select></div>
+  <div class="f"><label>Caso de uso</label>
+    <select id="uc"><option value="">Todos</option>
+      <option value="coding">Programación</option><option value="chat">Chat</option>
+      <option value="reasoning">Razonamiento</option><option value="multimodal">Multimodal</option>
+      <option value="general">General</option></select></div>
+  <div class="f"><label>Ordenar por</label>
+    <select id="sort"><option value="score">Puntaje</option><option value="tps">Velocidad</option>
+      <option value="memory">Memoria</option><option value="params">Parámetros</option></select></div>
+  <div class="f"><label>Buscar</label><input id="q" placeholder="qwen, llama, coder…"></div>
+  <div class="f"><label>Límite</label>
+    <select id="lim"><option>25</option><option selected>50</option>
+      <option>100</option><option>250</option></select></div>
+  <label class="chk"><input type="checkbox" id="tight"> Incluir los que no entran</label>
+  <button id="go">Actualizar</button>
+  <button class="ghost" id="csv" title="Exporta las filas actualmente listadas, con los filtros aplicados">Exportar CSV</button>
+  <button class="ghost" id="reset">Limpiar</button>
+</div>
+
+<div id="errbox"></div>
+
+<div class="main">
+  <div class="list" id="list">
+    <div class="empty">Cargando catálogo…</div>
+  </div>
+  <div class="side" id="side">
+    <div class="empty">Elegí un modelo de la lista<br>para ver el plan de hardware.</div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+const $ = id => document.getElementById(id);
+const gb = v => (v == null ? "—" : Number(v).toFixed(2) + " GB");
+const n1 = v => (v == null ? "—" : Number(v).toFixed(1));
+
+let SYS = null;      // system que reporta llmfit
+let GPU = null;      // telemetria en vivo (nvidia-smi)
+let ROWS = [];       // ultimo listado
+let SELECTED = null;
+
+// --------------------------------------------------------------------------
+// Presupuesto de VRAM: es el numero que se manda como vram_gb y con el que
+// llmfit re-puntua todo el catalogo del lado del servidor.
+// --------------------------------------------------------------------------
+function budgetGB() {
+  const mode = $("budget").value;
+  if (mode === "manual") return parseFloat($("vram").value) || null;
+  if (mode === "free" && GPU && GPU.gpus.length) return +GPU.gpus[0].free_gb.toFixed(2);
+  if (SYS && SYS.gpu_vram_gb) return SYS.gpu_vram_gb;
+  if (GPU && GPU.gpus.length) return +GPU.gpus[0].total_gb.toFixed(2);
+  return null;
+}
+
+// --------------------------------------------------------------------------
+// Telemetria de GPU
+// --------------------------------------------------------------------------
+async function pollGPU() {
+  try {
+    GPU = await (await fetch("/api/gpu")).json();
+  } catch (e) { GPU = null; }
+  renderGPU();
+}
+
+function renderGPU() {
+  const box = $("gpustrip");
+  const g = GPU && GPU.gpus.length ? GPU.gpus[0] : null;
+  const bud = budgetGB();
+
+  if (!g && !SYS) { box.innerHTML = ""; return; }
+
+  // Sin telemetría del vendor caemos a lo que reporta llmfit (sin uso en vivo).
+  const name  = g ? g.name  : (SYS ? SYS.gpu_name : "GPU desconocida");
+  const total = g ? g.total_gb : (SYS ? SYS.gpu_vram_gb : 0);
+  const used  = g ? g.used_gb  : null;
+  const free  = g ? g.free_gb  : null;
+  const unified = g ? g.unified : (SYS ? SYS.unified_memory : false);
+  const src = GPU && GPU.source ? GPU.source : null;
+
+  const pUsed = total ? Math.min(100, (used || 0) / total * 100) : 0;
+  const pBud  = total ? Math.max(0, Math.min(100 - pUsed, ((bud || 0) / total * 100))) : 0;
+
+  box.innerHTML = `
+    <div class="cell">
+      <div class="lbl">GPU${g ? "" : " (sin telemetría en vivo)"}</div>
+      <div class="val">${name}</div>
+      <div class="bar"><i class="used" style="width:${pUsed}%"></i>
+                       <i class="budget" style="width:${pBud}%"></i></div>
+      <div class="sub">${used != null ? `en uso ${used.toFixed(2)} GB · ` : ""}presupuesto ${gb(bud)} de ${gb(total)}</div>
+    </div>
+    <div class="cell">
+      <div class="lbl">${unified ? "Memoria unificada libre" : "VRAM libre"}</div>
+      <div class="val">${free != null ? free.toFixed(2) : (total || 0).toFixed(2)} <span class="u">GB</span></div>
+      <div class="sub">${src ? src + " · en vivo" : "estimado por llmfit"}</div>
+    </div>
+    <div class="cell">
+      <div class="lbl">Uso / Temp</div>
+      <div class="val">${g && g.util_pct != null ? g.util_pct : "—"} <span class="u">%</span>
+        &nbsp; ${g && g.temp_c != null ? g.temp_c : "—"} <span class="u">°C</span></div>
+      <div class="sub">${SYS ? SYS.backend : ""}${unified ? " · unificada" : ""}</div>
+    </div>
+    <div class="cell">
+      <div class="lbl">CPU / RAM</div>
+      <div class="val">${SYS ? SYS.total_ram_gb.toFixed(0) : "—"} <span class="u">GB</span>
+        &nbsp;<span class="u">${SYS ? SYS.cpu_cores + " núcleos" : ""}</span></div>
+      <div class="sub">${SYS ? SYS.cpu_name : ""}</div>
+    </div>`;
+}
+
+// --------------------------------------------------------------------------
+// Clasificacion visual: la pregunta real es "¿entra en la VRAM?"
+// --------------------------------------------------------------------------
+function classify(m) {
+  const bud = budgetGB();
+  const need = m.memory_required_gb;
+  const onGPU = (m.run_mode || "").toLowerCase() === "gpu";
+
+  if (!onGPU) {
+    const mode = (m.run_mode || "").toLowerCase();
+    return mode === "cpu_offload"
+      ? { cls: "warn", icon: "◐", txt: "CPU offload" }
+      : { cls: "bad", icon: "○", txt: "Solo CPU" };
+  }
+  if (bud != null && need != null && need > bud)
+    return { cls: "bad", icon: "✕", txt: "No entra" };
+
+  const f = (m.fit_label || "").toLowerCase();
+  if (f === "perfect") return { cls: "ok",   icon: "●", txt: "Perfecto" };
+  if (f === "good")    return { cls: "good", icon: "●", txt: "Bueno" };
+  return { cls: "warn", icon: "◐", txt: "Justo" };
+}
+
+// --------------------------------------------------------------------------
+// Consulta principal
+// --------------------------------------------------------------------------
+function buildQuery() {
+  const p = new URLSearchParams();
+  p.set("limit", $("lim").value);
+
+  const bud = budgetGB();
+  if (bud) p.set("vram_gb", bud);
+  if ($("ctx").value)    p.set("max_context", $("ctx").value);
+  if ($("minfit").value) p.set("min_fit", $("minfit").value);
+  if ($("rt").value)     p.set("runtime", $("rt").value);
+  if ($("uc").value)     p.set("use_case", $("uc").value);
+  if ($("q").value.trim()) p.set("search", $("q").value.trim());
+  p.set("sort", $("sort").value);
+  if ($("tight").checked) p.set("include_too_tight", "true");
+  return p.toString();
+}
+
+function showError(msg) {
+  $("errbox").innerHTML = msg ? `<div class="err">${msg}</div>` : "";
+}
+
+async function load() {
+  $("go").disabled = true;
+  $("list").innerHTML = '<div class="empty">Consultando llmfit…</div>';
+  showError("");
+  try {
+    const r = await fetch("/llmfit/api/v1/models?" + buildQuery());
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || d.error || ("HTTP " + r.status));
+
+    SYS = d.system;
+    ROWS = d.models || [];
+    $("p-node").textContent = d.node ? `${d.node.name} · ${d.node.os}` : "—";
+    $("p-cat").textContent = `${d.returned_models} de ${d.total_models} modelos`;
+    renderGPU();
+    renderTable();
+  } catch (e) {
+    showError("No se pudo consultar el backend llmfit: " + e.message);
+    $("list").innerHTML = '<div class="empty">Sin datos.</div>';
+  } finally {
+    $("go").disabled = false;
+  }
+}
+
+function renderTable() {
+  if (!ROWS.length) {
+    $("list").innerHTML = '<div class="empty">Ningún modelo cumple esos filtros.<br>' +
+      'Probá bajar el «ajuste mínimo» o marcar «incluir los que no entran».</div>';
+    return;
+  }
+  const bud = budgetGB();
+  const rows = ROWS.map((m, i) => {
+    const s = classify(m);
+    const pct = (bud && m.memory_required_gb)
+      ? Math.min(100, m.memory_required_gb / bud * 100) : 0;
+    const barCol = pct > 100 ? "var(--bad)" : pct > 85 ? "var(--warn)" : "var(--ok)";
+    const tps = m.measured_tps != null ? m.measured_tps : m.estimated_tps;
+    return `<tr data-i="${i}" class="${SELECTED === m.name ? "sel" : ""}">
+      <td class="st ${s.cls}">${s.icon} ${s.txt}</td>
+      <td><div class="name" title="${m.name}">${m.name.split("/").pop()}</div>
+          <div class="prov">${m.provider || "—"}</div></td>
+      <td class="num">${m.parameter_count || "—"}</td>
+      <td><span class="tag">${m.best_quant || "—"}</span></td>
+      <td class="num">${gb(m.memory_required_gb)}
+          <div class="meter"><i style="width:${Math.min(100, pct)}%;background:${barCol}"></i></div></td>
+      <td class="num">${n1(tps)}${m.measured_tps != null ? " *" : ""}</td>
+      <td class="num">${(m.effective_context_length || 0).toLocaleString("es")}</td>
+      <td><span class="tag">${m.runtime_label || m.runtime || "—"}</span></td>
+      <td class="num">${n1(m.score)}</td></tr>`;
+  }).join("");
+
+  $("list").innerHTML = `<table><thead><tr>
+      <th>Estado</th><th>Modelo</th><th>Params</th><th>Cuant.</th>
+      <th>VRAM req.</th><th>tok/s</th><th>Contexto</th><th>Runtime</th><th>Score</th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
+
+  $("list").querySelectorAll("tbody tr").forEach(tr => {
+    tr.onclick = () => selectModel(ROWS[+tr.dataset.i]);
+  });
+}
+
+// --------------------------------------------------------------------------
+// Panel de detalle + plan de hardware
+// --------------------------------------------------------------------------
+async function selectModel(m) {
+  SELECTED = m.name;
+  renderTable();
+
+  const s = classify(m);
+  const tpsLine = m.measured_tps != null
+    ? `${n1(m.measured_tps)} tok/s <span class="u">(medido)</span>`
+    : `${n1(m.estimated_tps)} tok/s <span class="u">(estimado)</span>`;
+
+  $("side").innerHTML = `
+    <h2>${m.name}</h2>
+    <div class="who">${m.provider || "—"} · ${m.use_case || m.category || ""}</div>
+    <div class="st ${s.cls}" style="font-size:15px">${s.icon} ${s.txt} — ${m.run_mode_label || m.run_mode}</div>
+
+    <div class="kv">
+      <div><div class="lbl">VRAM requerida</div><div class="v">${gb(m.memory_required_gb)}</div></div>
+      <div><div class="lbl">Disponible</div><div class="v">${gb(m.memory_available_gb)}</div></div>
+      <div><div class="lbl">Velocidad</div><div class="v">${tpsLine}</div></div>
+      <div><div class="lbl">Utilización</div><div class="v">${n1(m.utilization_pct)} %</div></div>
+      <div><div class="lbl">Cuantización</div><div class="v">${m.best_quant || "—"}</div></div>
+      <div><div class="lbl">Tamaño en disco</div><div class="v">${gb(m.disk_size_gb)}</div></div>
+      <div><div class="lbl">Contexto usable</div><div class="v">${(m.usable_context || 0).toLocaleString("es")}</div></div>
+      <div><div class="lbl">Licencia</div><div class="v">${m.license || "—"}</div></div>
+    </div>
+
+    <h3 class="sec">Cómo se calculó la velocidad</h3>
+    <div class="row"><span>método</span><b>${m.estimate_basis?.method || "—"}</b></div>
+    <div class="row"><span>ancho de banda GPU</span><b>${m.estimate_basis?.gpu_bandwidth_gbps ?? "—"} GB/s</b></div>
+    <div class="row"><span>eficiencia asumida</span><b>${m.estimate_basis?.efficiency ?? "—"}</b></div>
+    <div class="row"><span>contexto asumido</span><b>${(m.estimate_basis?.assumed_context || 0).toLocaleString("es")}</b></div>
+
+    ${m.notes?.length ? `<h3 class="sec">Notas de llmfit</h3>
+      <ul class="notes">${m.notes.map(x => `<li>${x}</li>`).join("")}</ul>` : ""}
+
+    <h3 class="sec">Plan de hardware</h3>
+    <div id="plan" class="row"><span>calculando…</span></div>
+
+    ${m.ollama_name ? `<h3 class="sec">Ejecutar</h3>
+      <div class="cmd">ollama run ${m.ollama_name}</div>` : ""}`;
+
+  loadPlan(m);
+}
+
+async function loadPlan(m) {
+  // `context` es obligatorio en /api/v1/plan: si el usuario no eligió uno,
+  // usamos el contexto efectivo con el que llmfit ya puntuó el modelo.
+  const ctx = parseInt($("ctx").value, 10) || m.effective_context_length || 8192;
+  const body = { model: m.name, context: ctx };
+  try {
+    const r = await fetch("/llmfit/api/v1/plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const p = await r.json();
+    if (!r.ok) throw new Error(p.detail || p.error || ("HTTP " + r.status));
+    if (SELECTED !== m.name) return;   // el usuario ya cambió de modelo
+
+    const paths = (p.run_paths || []).map(x => {
+      const label = { gpu: "GPU completa", cpu_offload: "Offload a CPU", cpu_only: "Solo CPU" }[x.path] || x.path;
+      return `<div class="row"><span>${label}</span>
+        <b>${n1(x.estimated_tps)} tok/s · ${x.fit_level}</b></div>`;
+    }).join("");
+
+    const kv = (p.kv_alternatives || []).filter(k => k.supported).map(k =>
+      `<div class="row"><span>KV ${k.kv_quant}</span>
+        <b>${gb(k.memory_required_gb)}${k.savings_fraction ? ` (−${Math.round(k.savings_fraction * 100)}%)` : ""}</b></div>`
+    ).join("");
+
+    $("plan").outerHTML = `
+      <div id="plan">
+        <div class="row"><span>mínimo</span><b>${gb(p.minimum?.vram_gb)} VRAM · ${p.minimum?.ram_gb ?? "—"} GB RAM · ${p.minimum?.cpu_cores ?? "—"} núcleos</b></div>
+        <div class="row"><span>recomendado</span><b>${gb(p.recommended?.vram_gb)} VRAM · ${p.recommended?.ram_gb ?? "—"} GB RAM · ${p.recommended?.cpu_cores ?? "—"} núcleos</b></div>
+        ${paths ? `<h3 class="sec">Modos de ejecución</h3>${paths}` : ""}
+        ${kv ? `<h3 class="sec">Ahorro por cuantizar el KV cache</h3>${kv}` : ""}
+      </div>`;
+  } catch (e) {
+    if (SELECTED === m.name) $("plan").innerHTML = `<span>plan no disponible: ${e.message}</span>`;
+  }
+}
+
+// --------------------------------------------------------------------------
+// Exportar a CSV
+// --------------------------------------------------------------------------
+
+// RFC 4180: se entrecomilla si hay separador, comillas o saltos de línea,
+// y las comillas internas se duplican.
+function csvCell(v) {
+  if (v == null) return "";
+  const s = String(v);
+  return /[",;\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function csvText(rows) {
+  return rows.map(r => r.map(csvCell).join(",")).join("\r\n");
+}
+
+function slug(s) {
+  return String(s).normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
+}
+
+function download(name, text) {
+  // El BOM (U+FEFF) hace que Excel abra el archivo como UTF-8 y no rompa
+  // los acentos; pandas y Sheets lo ignoran.
+  const blob = new Blob(["\uFEFF" + text], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+function exportCSV() {
+  if (!ROWS.length) { showError("No hay nada para exportar."); return; }
+
+  const bud = budgetGB();
+  const head = ["estado", "modelo", "proveedor", "parametros_b", "cuantizacion",
+    "vram_requerida_gb", "vram_disponible_gb", "utilizacion_pct",
+    "tok_s", "tok_s_es_medido", "contexto_efectivo", "contexto_usable",
+    "contexto_maximo", "runtime", "modo_ejecucion", "score", "calidad",
+    "disco_gb", "categoria", "caso_de_uso", "licencia", "moe", "capacidades"];
+
+  const body = ROWS.map(m => {
+    const s = classify(m);
+    return [
+      s.txt, m.name, m.provider, m.params_b, m.best_quant,
+      m.memory_required_gb, m.memory_available_gb, m.utilization_pct,
+      m.measured_tps != null ? m.measured_tps : m.estimated_tps,
+      m.measured_tps != null ? "si" : "no",
+      m.effective_context_length, m.usable_context, m.context_length,
+      m.runtime_label || m.runtime, m.run_mode_label || m.run_mode,
+      m.score, m.score_components ? m.score_components.quality : null,
+      m.disk_size_gb, m.category, m.use_case, m.license,
+      m.is_moe ? "si" : "no", (m.capability_ids || []).join(" "),
+    ];
+  });
+
+  const gpuName = (GPU && GPU.gpus.length) ? GPU.gpus[0].name
+                  : (SYS ? SYS.gpu_name : "gpu");
+  const ctx = $("ctx").value ? ($("ctx").value / 1024) + "K" : "auto";
+  const fecha = new Date().toISOString().slice(0, 10);
+  const nombre = `llmfit_${slug(gpuName)}_${bud ? bud.toFixed(1) + "GB" : "na"}_${ctx}_${fecha}.csv`;
+
+  download(nombre, csvText([head, ...body]));
+}
+
+// --------------------------------------------------------------------------
+// Arranque
+// --------------------------------------------------------------------------
+$("csv").onclick = exportCSV;
+$("budget").onchange = () => {
+  $("wrap-manual").style.display = $("budget").value === "manual" ? "flex" : "none";
+  renderGPU(); load();
+};
+$("go").onclick = load;
+$("reset").onclick = () => {
+  $("q").value = ""; $("rt").value = ""; $("uc").value = "";
+  $("ctx").value = ""; $("minfit").value = "marginal";
+  $("sort").value = "score"; $("tight").checked = false;
+  load();
+};
+$("q").addEventListener("keydown", e => { if (e.key === "Enter") load(); });
+["ctx", "minfit", "rt", "uc", "sort", "lim", "tight", "vram"]
+  .forEach(id => $(id).addEventListener("change", load));
+
+(async function init() {
+  await pollGPU();
+  setInterval(pollGPU, 3000);
+  try {
+    const st = await (await fetch("/api/status")).json();
+    $("p-back").textContent = st.llmfit ? "backend activo" : "backend caído";
+    $("p-back").className = "pill " + (st.llmfit ? "live" : "dead");
+  } catch (e) {
+    $("p-back").textContent = "backend caído";
+    $("p-back").className = "pill dead";
+  }
+  load();
+})();
+</script>
+</body>
+</html>

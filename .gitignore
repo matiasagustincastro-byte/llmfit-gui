@@ -1,0 +1,26 @@
+# Binarios de llmfit vendorizados por preparar-bundle.py (25 MB cada uno).
+# Se regeneran con:  python preparar-bundle.py --plataformas <plat>
+bin/
+
+# Paquetes distribuibles
+LLM-Fit.zip
+LLM-Fit-offline.zip
+*.zip
+
+# Instantánea generada por build_standalone.py (~1,4 MB).
+# Se regenera con:  uv run build_standalone.py
+llmfit-standalone.html
+
+# Exportaciones de la app
+llmfit_*.csv
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Sistema
+.DS_Store
+Thumbs.db
+desktop.ini

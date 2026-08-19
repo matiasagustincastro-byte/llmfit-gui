@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLM Fit — ¿Qué modelo entra en mi GPU?</title>
+<style>
+  :root{
+    --bg:#0b0f17; --panel:#121826; --panel2:#0e1420; --line:#1f2937;
+    --txt:#e6edf7; --dim:#8b9bb4; --dim2:#5f7189;
+    --ok:#2fd47f; --good:#7fd44a; --warn:#f0b429; --bad:#f0556a; --acc:#3fa9f5;
+    --mono:ui-monospace,"Cascadia Code",Consolas,monospace;
+    --sans:"Segoe UI",system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:14px}
+  .top{display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+       padding:14px 20px;background:var(--panel);border-bottom:1px solid var(--line)}
+  .brand{font-size:18px;font-weight:650;letter-spacing:-.2px}
+  .brand small{display:block;font-size:11px;font-weight:400;color:var(--dim2);
+    letter-spacing:.6px;text-transform:uppercase}
+  .spacer{flex:1}
+  .pill{font-family:var(--mono);font-size:11px;padding:3px 9px;border-radius:999px;
+        border:1px solid var(--line);color:var(--dim);white-space:nowrap}
+
+  .note{background:#161d2c;border-bottom:1px solid var(--line);
+        padding:9px 20px;font-size:12.5px;color:var(--dim);line-height:1.6}
+  .note b{color:var(--warn)}
+
+  .ctrl{display:flex;flex-wrap:wrap;gap:14px;padding:14px 20px;
+        background:var(--panel);border-bottom:1px solid var(--line);align-items:flex-end}
+  .f{display:flex;flex-direction:column;gap:5px}
+  .f label{font-size:10px;text-transform:uppercase;letter-spacing:.7px;color:var(--dim2)}
+  select,input{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    padding:7px 9px;border-radius:6px;font-family:var(--sans);font-size:13px;outline:none}
+  select:focus,input:focus{border-color:var(--acc)}
+  input[type=number]{width:95px;font-family:var(--mono)}
+  #q{width:210px}
+  button{background:var(--acc);color:#04121f;border:0;padding:8px 15px;border-radius:6px;
+    font-weight:650;font-size:13px;cursor:pointer}
+  button.ghost{background:transparent;border:1px solid var(--line);color:var(--dim)}
+  .chk{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--dim);padding-bottom:8px}
+  .chk input{width:15px;height:15px;accent-color:var(--acc)}
+
+  .sum{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);
+       border-bottom:1px solid var(--line)}
+  .sum .cell{background:var(--panel2);padding:11px 20px}
+  .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--dim2);margin-bottom:4px}
+  .val{font-family:var(--mono);font-size:15px;font-weight:600}
+  .val .u{font-size:11px;color:var(--dim);font-weight:400}
+
+  .wrap{overflow:auto;height:calc(100vh - 300px);min-height:300px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  thead th{position:sticky;top:0;background:var(--panel);z-index:2;text-align:left;
+    padding:9px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.7px;
+    color:var(--dim2);border-bottom:1px solid var(--line);white-space:nowrap;cursor:pointer}
+  thead th:hover{color:var(--txt)}
+  tbody td{padding:9px 10px;border-bottom:1px solid #151c29}
+  tbody tr:hover{background:#141c2b}
+  .name{font-weight:550;max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .prov{font-size:11px;color:var(--dim2)}
+  .num{font-family:var(--mono);text-align:right;white-space:nowrap}
+  .tag{display:inline-block;font-family:var(--mono);font-size:10px;padding:2px 6px;
+       border-radius:4px;background:#1a2434;color:var(--dim)}
+  .st{font-weight:650;white-space:nowrap;font-size:12.5px}
+  .st.ok{color:var(--ok)} .st.good{color:var(--good)}
+  .st.warn{color:var(--warn)} .st.bad{color:var(--bad)}
+  .meter{width:60px;height:5px;border-radius:3px;background:#1a2434;overflow:hidden;margin-top:4px}
+  .meter i{display:block;height:100%}
+  .empty{color:var(--dim2);text-align:center;padding:60px 20px;line-height:1.7}
+  .foot{padding:11px 20px;font-size:11.5px;color:var(--dim2);background:var(--panel);
+        border-top:1px solid var(--line);line-height:1.6}
+  @media(max-width:900px){.sum{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div class="brand">¿Qué modelo entra en mi GPU?<small>llmfit · instantánea sin conexión</small></div>
+  <div class="spacer"></div>
+  <span class="pill" id="p-count">—</span>
+  <span class="pill" id="p-gen">—</span>
+</div>
+
+<div class="note">
+  <b>Archivo autónomo.</b> Un HTML abierto con <code>file://</code> no puede leer tu GPU
+  — el navegador lo impide, y detectarla por WebGL da la placa equivocada en portátiles
+  híbridas. Por eso <b>elegí tu GPU abajo</b>. Las cifras de memoria las calculó llmfit;
+  los tok/s son una aproximación.
+</div>
+
+<div class="ctrl">
+  <div class="f"><label>Tu GPU</label><select id="gpu"></select></div>
+  <div class="f"><label>VRAM (GB)</label><input type="number" id="vram" min="1" max="512" step="0.5"></div>
+  <div class="f"><label>Ancho de banda (GB/s)</label><input type="number" id="bw" min="10" max="8000" step="10"></div>
+  <div class="f"><label>Contexto</label><select id="ctx"></select></div>
+  <div class="f"><label>Mostrar</label>
+    <select id="fit">
+      <option value="fit" selected>Solo los que entran</option>
+      <option value="all">Todos</option>
+      <option value="tight">Solo los justos</option>
+    </select></div>
+  <div class="f"><label>Categoría</label><select id="cat"><option value="">Todas</option></select></div>
+  <div class="f"><label>Cuantización</label><select id="quant"><option value="">Todas</option></select></div>
+  <div class="f"><label>Buscar</label><input id="q" placeholder="qwen, llama, coder…"></div>
+  <div class="f"><label>Límite</label>
+    <select id="lim"><option>50</option><option selected>100</option>
+      <option>250</option><option value="99999">Todos</option></select></div>
+  <label class="chk"><input type="checkbox" id="tools"> Solo con tool use</label>
+  <button id="csv" title="Exporta todas las coincidencias, no solo las visibles">Exportar CSV</button>
+  <button class="ghost" id="reset">Limpiar</button>
+</div>
+
+<div class="sum" id="sum"></div>
+
+<div class="wrap"><div id="list"><div class="empty">Cargando…</div></div></div>
+
+<div class="foot" id="foot"></div>
+
+<script>
+"use strict";
+/* __DATOS__ */
+
+// Índices de columna dentro de cada fila de DATA (formato compacto).
+const N=0, PROV=1, PARAMS=2, QUANT=3, DISK=4, CTXMAX=5, CAT=6, USE=7,
+      LIC=8, MOE=9, CAPS=10, MEM=11, QUAL=12;
+
+// Eficiencia del roofline que usa llmfit (estimate_basis.efficiency).
+const EFF = 0.55;
+
+const $ = id => document.getElementById(id);
+const gb = v => (v == null ? "—" : v.toFixed(2) + " GB");
+let SORT = { col: "qual", dir: -1 };   // mejor calidad primero
+
+// --------------------------------------------------------------------------
+// Poblar controles a partir de los datos embebidos
+// --------------------------------------------------------------------------
+(function initControls() {
+  const g = $("gpu");
+  GPUS.forEach(([name, vram, bw], i) => {
+    const o = document.createElement("option");
+    o.value = i; o.textContent = name;
+    if (vram == null) { o.disabled = true; o.style.color = "#5f7189"; }
+    g.appendChild(o);
+  });
+  const man = document.createElement("option");
+  man.value = "manual"; man.textContent = "Otra / manual…";
+  g.appendChild(man);
+
+  // Primer preset real como valor inicial.
+  const first = GPUS.findIndex(x => x[1] != null);
+  g.value = first;
+  applyGPU();
+
+  const c = $("ctx");
+  META.contexts.forEach((n, i) => {
+    const o = document.createElement("option");
+    o.value = i;
+    o.textContent = n >= 1024 ? (n / 1024) + "K tokens" : n + " tokens";
+    c.appendChild(o);
+  });
+  c.value = Math.min(2, META.contexts.length - 1);   // 8K por defecto
+
+  const cats = [...new Set(DATA.map(r => r[CAT]).filter(Boolean))].sort();
+  cats.forEach(v => $("cat").add(new Option(v, v)));
+  const qs = [...new Set(DATA.map(r => r[QUANT]).filter(Boolean))].sort();
+  qs.forEach(v => $("quant").add(new Option(v, v)));
+
+  $("p-count").textContent = META.count.toLocaleString("es") + " modelos";
+  $("p-gen").textContent = "generado " + META.generated;
+  $("foot").innerHTML =
+    `Instantánea de <b>llmfit ${META.llmfit_version}</b> generada el ${META.generated}. ` +
+    `La memoria requerida por modelo la calculó llmfit para cada nivel de contexto. ` +
+    `Los tok/s se estiman acá con <code>ancho_de_banda × ${EFF} ÷ peso_en_disco</code>, ` +
+    `que reproduce a llmfit con ~6&nbsp;% de error mediano pero se desvía en MoE y modelos muy chicos. ` +
+    `Para números en vivo contra tu hardware real, usá la app con servidor.`;
+})();
+
+function applyGPU() {
+  const v = $("gpu").value;
+  if (v === "manual") return;
+  const [, vram, bw] = GPUS[+v];
+  if (vram != null) { $("vram").value = vram; $("bw").value = bw; }
+}
+
+// --------------------------------------------------------------------------
+// Cálculo
+// --------------------------------------------------------------------------
+function verdict(need, vram) {
+  if (need == null) return { cls: "bad", icon: "✕", txt: "sin dato", rank: 4 };
+  const u = need / vram;
+  if (u > 1)   return { cls: "bad",  icon: "✕", txt: "No entra",     rank: 3 };
+  if (u > 0.9) return { cls: "warn", icon: "◐", txt: "Justo",        rank: 2 };
+  if (u > 0.75)return { cls: "good", icon: "●", txt: "Entra",        rank: 1 };
+  return         { cls: "ok",   icon: "●", txt: "Entra holgado", rank: 0 };
+}
+
+function tps(disk, bw) {
+  if (!disk || !bw) return null;
+  return bw * EFF / disk;
+}
+
+function currentRows() {
+  const ci = +$("ctx").value;
+  const vram = parseFloat($("vram").value) || 0;
+  const bw = parseFloat($("bw").value) || 0;
+  const mode = $("fit").value;
+  const cat = $("cat").value, qz = $("quant").value;
+  const term = $("q").value.trim().toLowerCase();
+  const onlyTools = $("tools").checked;
+
+  let out = [];
+  for (const r of DATA) {
+    const need = r[MEM][ci];
+    if (need == null) continue;
+    if (cat && r[CAT] !== cat) continue;
+    if (qz && r[QUANT] !== qz) continue;
+    if (onlyTools && !(r[CAPS] || []).includes("tool_use")) continue;
+    if (term && !(r[N] + " " + r[PROV] + " " + r[USE]).toLowerCase().includes(term)) continue;
+
+    const v = verdict(need, vram);
+    if (mode === "fit" && v.rank >= 3) continue;
+    if (mode === "tight" && v.rank !== 2) continue;
+    out.push({ r, need, v, t: tps(r[DISK], bw) });
+  }
+
+  const key = SORT.col;
+  out.sort((a, b) => {
+    let x, y;
+    if (key === "mem")        { x = a.need;      y = b.need; }
+    else if (key === "tps")   { x = a.t || 0;    y = b.t || 0; }
+    else if (key === "params"){ x = a.r[PARAMS]; y = b.r[PARAMS]; }
+    else if (key === "qual")  { x = a.r[QUAL];   y = b.r[QUAL]; }
+    else if (key === "name")  { return SORT.dir * a.r[N].localeCompare(b.r[N]); }
+    else                      { x = a.r[QUAL];   y = b.r[QUAL]; }
+    return SORT.dir * (x - y);
+  });
+  return out;
+}
+
+// --------------------------------------------------------------------------
+// Render
+// --------------------------------------------------------------------------
+// Resumen sobre el catálogo entero: solo depende de VRAM y contexto, no de
+// los filtros de búsqueda, para que el número no cambie al escribir.
+function stats(vram, ci) {
+  let fits = 0, biggest = 0;
+  for (const r of DATA) {
+    const need = r[MEM][ci];
+    if (need == null || need > vram) continue;
+    fits++;
+    if (r[PARAMS] > biggest) biggest = r[PARAMS];
+  }
+  return { fits, biggest };
+}
+
+function render() {
+  const vram = parseFloat($("vram").value) || 0;
+  const ci = +$("ctx").value;
+  const rows = currentRows();
+  const lim = +$("lim").value;
+  const shown = rows.slice(0, lim);
+  const { fits, biggest } = stats(vram, ci);
+
+  $("sum").innerHTML = `
+    <div class="cell"><div class="lbl">Presupuesto</div>
+      <div class="val">${vram.toFixed(1)} <span class="u">GB VRAM</span></div></div>
+    <div class="cell"><div class="lbl">Modelos que entran</div>
+      <div class="val">${fits.toLocaleString("es")} <span class="u">de ${META.count.toLocaleString("es")}</span></div></div>
+    <div class="cell"><div class="lbl">El más grande que entra</div>
+      <div class="val">${biggest ? biggest.toFixed(0) : "—"} <span class="u">B parámetros</span></div></div>
+    <div class="cell"><div class="lbl">Contexto</div>
+      <div class="val">${META.contexts[ci] / 1024}<span class="u">K tokens</span></div></div>`;
+
+  if (!shown.length) {
+    $("list").innerHTML = '<div class="empty">Ningún modelo cumple esos filtros.<br>' +
+      'Probá subir la VRAM o poner «Mostrar: todos».</div>';
+    return;
+  }
+
+  const body = shown.map(({ r, need, v, t }) => {
+    const pct = Math.min(100, need / vram * 100);
+    const col = pct > 100 ? "var(--bad)" : pct > 90 ? "var(--warn)" : "var(--ok)";
+    return `<tr>
+      <td class="st ${v.cls}">${v.icon} ${v.txt}</td>
+      <td><div class="name" title="${r[N]}">${r[N].split("/").pop()}</div>
+          <div class="prov">${r[PROV]}${r[MOE] ? " · MoE" : ""}</div></td>
+      <td class="num">${r[PARAMS]}B</td>
+      <td><span class="tag">${r[QUANT] || "—"}</span></td>
+      <td class="num">${gb(need)}
+        <div class="meter"><i style="width:${Math.min(100, pct)}%;background:${col}"></i></div></td>
+      <td class="num">${t ? t.toFixed(0) : "—"}</td>
+      <td class="num">${(r[CTXMAX] || 0).toLocaleString("es")}</td>
+      <td><span class="tag">${r[CAT] || "—"}</span></td>
+      <td class="num">${r[QUAL] || "—"}</td>
+    </tr>`;
+  }).join("");
+
+  $("list").innerHTML = `<table><thead><tr>
+      <th>Estado</th><th data-s="name">Modelo</th><th data-s="params">Params</th>
+      <th>Cuant.</th><th data-s="mem">VRAM req.</th><th data-s="tps">tok/s aprox</th>
+      <th>Contexto máx</th><th>Categoría</th><th data-s="qual">Calidad</th>
+    </tr></thead><tbody>${body}</tbody></table>` +
+    (rows.length > shown.length
+      ? `<div class="empty">mostrando ${shown.length} de ${rows.length} coincidencias</div>` : "");
+
+  $("list").querySelectorAll("th[data-s]").forEach(th => {
+    th.onclick = () => {
+      const c = th.dataset.s;
+      SORT.dir = SORT.col === c ? -SORT.dir : 1;
+      SORT.col = c;
+      render();
+    };
+  });
+}
+
+// --------------------------------------------------------------------------
+// Exportar a CSV
+// --------------------------------------------------------------------------
+
+// RFC 4180: se entrecomilla si hay separador, comillas o saltos de línea,
+// y las comillas internas se duplican.
+function csvCell(v) {
+  if (v == null) return "";
+  const s = String(v);
+  return /[",;\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function slug(s) {
+  return String(s).normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
+}
+
+function exportCSV() {
+  // Se exportan TODAS las coincidencias de los filtros, no solo las que el
+  // límite deja ver en pantalla.
+  const rows = currentRows();
+  if (!rows.length) { alert("No hay filas para exportar con esos filtros."); return; }
+
+  const ci = +$("ctx").value;
+  const ctxTokens = META.contexts[ci];
+  const vram = parseFloat($("vram").value) || 0;
+  const bw = parseFloat($("bw").value) || 0;
+
+  const head = ["estado", "modelo", "proveedor", "parametros_b", "cuantizacion",
+    "vram_requerida_gb", "vram_presupuesto_gb", "utilizacion_pct",
+    "tok_s_aprox", "contexto_evaluado", "contexto_maximo", "categoria",
+    "caso_de_uso", "calidad", "disco_gb", "licencia", "moe", "capacidades"];
+
+  const body = rows.map(({ r, need, v, t }) => [
+    v.txt, r[N], r[PROV], r[PARAMS], r[QUANT],
+    need, vram, vram ? (need / vram * 100).toFixed(1) : "",
+    t ? t.toFixed(1) : "", ctxTokens, r[CTXMAX], r[CAT],
+    r[USE], r[QUAL], r[DISK], r[LIC], r[MOE] ? "si" : "no",
+    (r[CAPS] || []).join(" "),
+  ]);
+
+  const text = [head, ...body].map(r => r.map(csvCell).join(",")).join("\r\n");
+
+  // El BOM (U+FEFF) hace que Excel abra el archivo como UTF-8 y no rompa
+  // los acentos; pandas y Sheets lo ignoran.
+  const blob = new Blob(["\uFEFF" + text], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const gpuName = $("gpu").value === "manual" ? "manual" : GPUS[+$("gpu").value][0];
+  a.href = url;
+  a.download = `llmfit_${slug(gpuName)}_${vram}GB_${ctxTokens / 1024}K_${META.generated.slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+// --------------------------------------------------------------------------
+$("csv").onclick = exportCSV;
+$("gpu").onchange = () => { applyGPU(); render(); };
+["vram", "bw", "ctx", "fit", "cat", "quant", "lim", "tools"]
+  .forEach(id => $(id).addEventListener("change", render));
+$("q").addEventListener("input", render);
+$("reset").onclick = () => {
+  $("q").value = ""; $("cat").value = ""; $("quant").value = "";
+  $("fit").value = "fit"; $("tools").checked = false;
+  SORT = { col: "qual", dir: -1 };
+  render();
+};
+
+render();
+</script>
+</body>
+</html>

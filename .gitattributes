@@ -1,0 +1,17 @@
+# Los finales de línea importan acá: si `run.sh` o el shebang de
+# `llmfit-gui.py` llegan a Linux con CRLF, fallan con
+#   bad interpreter: /usr/bin/env -S uv run --script^M
+# Por eso se fuerza LF en todo lo que se ejecuta en POSIX.
+
+* text=auto eol=lf
+
+# Scripts que solo corren en Windows: ahí CRLF es lo correcto.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# Sin conversión.
+*.jpg  binary
+*.png  binary
+*.zip  binary
+*.exe  binary
