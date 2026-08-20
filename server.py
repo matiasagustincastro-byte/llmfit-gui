@@ -389,11 +389,14 @@ def read_gpu(max_age=2.0):
             break
 
     # nvidia-smi y rocm-smi no informan ancho de banda, y es el numero que
-    # decide la velocidad. Lo saca el catalogo a partir del nombre.
+    # decide la velocidad. Lo saca el catalogo a partir del nombre: es un
+    # valor nominal, no una medicion, y va marcado como tal para que nadie
+    # -- interfaz ni consumidor de la API -- lo confunda con telemetria.
     for g in gpus or []:
         fila = catalog_lookup(g.get("name"), g.get("total_gb"))
         g["catalog_name"] = fila[0] if fila else None
         g["bandwidth_gbps"] = fila[2] if fila else None
+        g["bandwidth_source"] = "catalogo:gpus.py" if fila else None
 
     data = {"gpus": gpus or [], "available": bool(gpus), "source": source}
 

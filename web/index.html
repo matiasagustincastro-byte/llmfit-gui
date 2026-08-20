@@ -33,7 +33,7 @@
   .gpu .cell{background:var(--panel2);padding:12px 20px;min-width:0}
   .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--dim2);margin-bottom:5px}
   .val{font-family:var(--mono);font-size:15px;font-weight:600}
-  .val .u{font-size:11px;color:var(--dim);font-weight:400}
+  .u{font-size:11px;color:var(--dim);font-weight:400}
   .bar{height:7px;border-radius:4px;background:#1a2434;overflow:hidden;margin-top:8px;display:flex}
   .bar i{display:block;height:100%}
   .bar .used{background:linear-gradient(90deg,#f0b429,#f0556a)}
@@ -301,6 +301,15 @@ function renderGPU() {
   const src = GPU && GPU.source ? GPU.source : null;
   const bw = sim ? sim[2] : (g ? g.bandwidth_gbps : null);
 
+  // El ancho de banda nunca sale del driver: nvidia-smi y rocm-smi no lo
+  // informan. Es un valor nominal de catalogo, y la interfaz tiene que
+  // decirlo — con el nombre exacto de la ficha que se le aplico, para que
+  // una coincidencia equivocada se vea en vez de pasar por medicion.
+  const ficha = sim ? sim[0] : (g ? g.catalog_name : null);
+  const bwText = bw
+    ? ` · <span title="valor nominal de catálogo para «${ficha}»; el driver no informa ancho de banda">${bw} GB/s · catálogo</span>`
+    : (g ? ' · <span title="el nombre que reporta el driver no coincide con ninguna ficha del catálogo">ancho de banda: sin ficha</span>' : "");
+
   const pUsed = total ? Math.min(100, (used || 0) / total * 100) : 0;
   const pBud  = total ? Math.max(0, Math.min(100 - pUsed, ((bud || 0) / total * 100))) : 0;
 
@@ -310,7 +319,7 @@ function renderGPU() {
       <div class="val">${name}</div>
       <div class="bar"><i class="used" style="width:${pUsed}%"></i>
                        <i class="budget" style="width:${pBud}%"></i></div>
-      <div class="sub">${used != null ? `en uso ${used.toFixed(2)} GB · ` : ""}presupuesto ${gb(bud)} de ${gb(total)}${bw ? " · " + bw + " GB/s" : ""}</div>
+      <div class="sub">${used != null ? `en uso ${used.toFixed(2)} GB · ` : ""}presupuesto ${gb(bud)} de ${gb(total)}${bwText}</div>
     </div>
     <div class="cell">
       <div class="lbl">${sim ? "VRAM simulada" : (unified ? "Memoria unificada libre" : "VRAM libre")}</div>
@@ -450,6 +459,18 @@ async function selectModel(m) {
     ? `${n1(m.measured_tps)} tok/s <span class="u">(medido)</span>`
     : `${n1(m.estimated_tps)} tok/s <span class="u">(estimado)</span>`;
 
+  // Procedencia del ancho de banda. llmfit tiene su propia tabla y no
+  // siempre distingue variantes (a una RTX 5070 Laptop le pone los 672 GB/s
+  // de la de escritorio, que son 128 bits contra 192). Cuando su cifra y la
+  // del catalogo no coinciden se muestran las dos: el tok/s de arriba lo
+  // calculo llmfit con la suya, y esconder la diferencia seria mentir sobre
+  // de donde sale el numero.
+  const g0 = GPU && GPU.gpus.length ? GPU.gpus[0] : null;
+  const sim = $("budget").value === "preset" ? presetRow() : null;
+  const bwFit = m.estimate_basis?.gpu_bandwidth_gbps ?? null;
+  const bwCat = g0 ? g0.bandwidth_gbps : null;
+  const discrepa = bwFit && bwCat && Math.abs(bwFit - bwCat) / bwCat > 0.05;
+
   $("side").innerHTML = `
     <h2>${m.name}</h2>
     <div class="who">${m.provider || "—"} · ${m.use_case || m.category || ""}</div>
@@ -468,9 +489,20 @@ async function selectModel(m) {
 
     <h3 class="sec">Cómo se calculó la velocidad</h3>
     <div class="row"><span>método</span><b>${m.estimate_basis?.method || "—"}</b></div>
-    <div class="row"><span>ancho de banda GPU</span><b>${m.estimate_basis?.gpu_bandwidth_gbps ?? "—"} GB/s</b></div>
+    <div class="row"><span>ancho de banda GPU</span>
+      <b>${bwFit ?? "—"} GB/s <span class="u">según llmfit</span></b></div>
+    ${discrepa ? `<div class="row"><span>catálogo · ${g0.catalog_name}</span>
+      <b>${bwCat} GB/s</b></div>` : ""}
     <div class="row"><span>eficiencia asumida</span><b>${m.estimate_basis?.efficiency ?? "—"}</b></div>
     <div class="row"><span>contexto asumido</span><b>${(m.estimate_basis?.assumed_context || 0).toLocaleString("es")}</b></div>
+    ${discrepa ? `<ul class="notes"><li>Los tok/s de arriba los calculó llmfit
+        con <b>${bwFit} GB/s</b>. El catálogo de esta app le asigna
+        <b>${bwCat} GB/s</b> a tu placa; si la ficha es la correcta, la
+        velocidad real va a ser más baja en esa proporción.</li></ul>` : ""}
+    ${sim ? `<ul class="notes"><li>Estás simulando una <b>${sim[0]}</b>: llmfit
+        re-puntuó la memoria contra sus ${sim[1]} GB, pero la velocidad la
+        calculó con el ancho de banda de tu placa real, no con los
+        ${sim[2]} GB/s de la simulada.</li></ul>` : ""}
 
     ${m.notes?.length ? `<h3 class="sec">Notas de llmfit</h3>
       <ul class="notes">${m.notes.map(x => `<li>${x}</li>`).join("")}</ul>` : ""}

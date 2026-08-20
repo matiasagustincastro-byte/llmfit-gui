@@ -17,6 +17,34 @@ uv run build_standalone.py            # regenera llmfit-standalone.html
 
 ---
 
+## [0.2.1] — 2026-08-20
+
+Fidelidad de los datos de hardware: cada cifra de GPU dice de dónde sale.
+
+### Cambiado
+
+- **El ancho de banda va etiquetado como catálogo, no como medición.** Ni
+  `nvidia-smi` ni `rocm-smi` lo informan: sale de una ficha nominal de
+  `gpus.py`. La tira superior ahora muestra `448 GB/s · catálogo` (con el
+  nombre de la ficha aplicada en el tooltip) en vez de un número pelado que
+  parecía telemetría. Si el nombre que reporta el driver no coincide con
+  ninguna ficha, dice `ancho de banda: sin ficha` en lugar de callarse.
+- **Se muestra la discrepancia con llmfit en vez de esconderla.** llmfit tiene
+  su propia tabla y no siempre distingue variantes: a una RTX 5070 Laptop le
+  asigna los 672 GB/s de la de escritorio (192 bits) cuando la de portátil son
+  128 bits y 448 GB/s. Cuando las dos cifras difieren más de un 5 %, el panel
+  lateral muestra ambas —`672 GB/s según llmfit` y `catálogo · RTX 5070
+  Laptop (8 GB) 448 GB/s`— y aclara que los tok/s de arriba los calculó llmfit
+  con la suya.
+- **Al simular otra placa, el panel lo dice.** La velocidad se sigue calculando
+  con el ancho de banda del hardware real, porque llmfit solo acepta un
+  presupuesto de VRAM; ahora esa nota aparece junto a los números, no solo en
+  la tira.
+- `GET /api/gpu` agrega `bandwidth_source` (`"catalogo:gpus.py"` o `null`), para
+  que un consumidor de la API tampoco pueda confundir la ficha con telemetría.
+
+---
+
 ## [0.2.0] — 2026-08-20
 
 Catálogo de placas propio. Antes había 45 GPUs escritas a mano dentro de
@@ -99,5 +127,6 @@ Primera versión.
 - Lanzadores `run.sh`, `LLM-Fit.bat` e `instalar-acceso-directo.ps1`.
 - Interfaz en español, sin build ni dependencias JS.
 
+[0.2.1]: https://github.com/matiasagustincastro-byte/llmfit-gui/releases/tag/v0.2.1
 [0.2.0]: https://github.com/matiasagustincastro-byte/llmfit-gui/releases/tag/v0.2.0
 [0.1.0]: https://github.com/matiasagustincastro-byte/llmfit-gui/releases/tag/v0.1.0
