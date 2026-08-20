@@ -332,6 +332,10 @@ Para desarrollar conviene `uv run server.py`, que no hay que regenerar.
 
 - Los tok/s son **estimaciones** del modelo de roofline de llmfit, no
   benchmarks. Los medidos aparecen con `*`. Para medir de verdad: `llmfit bench`.
+- `preparar-bundle.py --todas` reusa los binarios que ya estén en `bin/` si
+  coinciden con la versión que publica PyPI (lo marca un `.llmfit-version` al
+  lado de cada uno). Rearmar el ZIP pasa de bajar 215 MB a no bajar nada;
+  `--rebajar` fuerza la descarga.
 - El catálogo de modelos se actualiza con `llmfit update`. El de placas es
   `gpus.py`: agregar una es una línea `("Nombre (N GB)", vram_gb, ancho_gbps)`.
   Las cifras son las nominales del fabricante; lo que manda la velocidad es el

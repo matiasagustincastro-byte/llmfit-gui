@@ -122,6 +122,30 @@ def pypi_urls():
     return data["info"]["version"], data["urls"]
 
 
+# Cada binario extraido deja al lado un archivo con la version del wheel del
+# que salio. Con eso, una segunda corrida sabe que ya tiene lo que necesita y
+# se ahorra bajar ~27 MB de wheel por plataforma para extraer lo mismo.
+SELLO = ".llmfit-version"
+
+
+def binario_local(destino_dir, version):
+    """Ruta del ejecutable ya presente para esa version, o None."""
+    sello = os.path.join(destino_dir, SELLO)
+    if not os.path.isfile(sello):
+        return None
+    try:
+        with open(sello, encoding="utf-8") as f:
+            if f.read().strip() != version:
+                return None
+    except OSError:
+        return None
+    for nombre in ("llmfit.exe", "llmfit"):
+        ruta = os.path.join(destino_dir, nombre)
+        if os.path.isfile(ruta):
+            return ruta
+    return None
+
+
 def bajar_binario(urls, fragmento, destino_dir):
     """Descarga el wheel de esa plataforma y extrae el ejecutable llmfit."""
     match = next((u for u in urls if fragmento in u["filename"]), None)
@@ -147,6 +171,11 @@ def bajar_binario(urls, fragmento, destino_dir):
     if not salida.endswith(".exe"):
         os.chmod(salida, 0o755)
     return salida, None
+
+
+def sellar(destino_dir, version):
+    with open(os.path.join(destino_dir, SELLO), "w", encoding="utf-8") as f:
+        f.write(version)
 
 
 def generar_unico(salida):
@@ -209,6 +238,8 @@ def main():
                     help="vendorizar el binario de todas las plataformas")
     ap.add_argument("--standalone", action="store_true",
                     help="incluir tambien llmfit-standalone.html si existe")
+    ap.add_argument("--rebajar", action="store_true",
+                    help="volver a bajar los binarios aunque bin/ ya los tenga")
     ap.add_argument("--listar", action="store_true",
                     help="mostrar las plataformas disponibles y salir")
     ap.add_argument("--unico", action="store_true",
@@ -243,17 +274,28 @@ def main():
         print("[..] consultando PyPI")
         version, urls = pypi_urls()
         print("[ok] llmfit %s" % version)
+        reusados = 0
         for p in elegidas:
             frag, dest = PLATAFORMAS[p]
             destino = os.path.join(BASE_DIR, "bin", dest)
             print("  %-19s ..." % p, end="", flush=True)
-            ruta, err = bajar_binario(urls, frag, destino)
-            if err:
-                print(" ERROR: %s" % err)
-                continue
-            mb = os.path.getsize(ruta) / 1048576.0
-            print(" %.1f MB -> bin/%s/%s" % (mb, dest, os.path.basename(ruta)))
+
+            ruta = None if args.rebajar else binario_local(destino, version)
+            if ruta:
+                print(" ya esta en bin/%s (%s)" % (dest, version))
+                reusados += 1
+            else:
+                ruta, err = bajar_binario(urls, frag, destino)
+                if err:
+                    print(" ERROR: %s" % err)
+                    continue
+                sellar(destino, version)
+                mb = os.path.getsize(ruta) / 1048576.0
+                print(" %.1f MB -> bin/%s/%s" % (mb, dest, os.path.basename(ruta)))
             vendorizados.append(os.path.relpath(ruta, BASE_DIR))
+        if reusados:
+            print("[ok] %d binario(s) reusados de bin/; --rebajar fuerza la descarga"
+                  % reusados)
 
     faltantes = [f for f in FUENTES if not os.path.isfile(os.path.join(BASE_DIR, f))]
     if faltantes:

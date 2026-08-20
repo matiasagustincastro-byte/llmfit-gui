@@ -17,6 +17,19 @@ uv run build_standalone.py            # regenera llmfit-standalone.html
 
 ---
 
+## [0.2.4] — 2026-08-20
+
+### Agregado
+
+- **`preparar-bundle.py` deja de re-descargar lo que ya tiene.** Cada binario
+  extraído deja al lado un `.llmfit-version` con la versión del wheel del que
+  salió; si coincide con la que publica PyPI, se reusa. Rearmar el ZIP completo
+  pasa de **215 MB y ~1 minuto a 8 segundos** y una sola consulta de 1 KB a
+  PyPI —la que dice qué versión es la actual, para no quedarse con binarios
+  viejos—. `--rebajar` fuerza la descarga.
+
+---
+
 ## [0.2.3] — 2026-08-20
 
 Los modelos MoE mostraban solo la mitad de su memoria.
@@ -200,6 +213,7 @@ Primera versión.
 - Lanzadores `run.sh`, `LLM-Fit.bat` e `instalar-acceso-directo.ps1`.
 - Interfaz en español, sin build ni dependencias JS.
 
+[0.2.4]: https://github.com/matiasagustincastro-byte/llmfit-gui/releases/tag/v0.2.4
 [0.2.3]: https://github.com/matiasagustincastro-byte/llmfit-gui/releases/tag/v0.2.3
 [0.2.2]: https://github.com/matiasagustincastro-byte/llmfit-gui/releases/tag/v0.2.2
 [0.2.1]: https://github.com/matiasagustincastro-byte/llmfit-gui/releases/tag/v0.2.1
