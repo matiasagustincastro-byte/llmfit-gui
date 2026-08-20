@@ -91,6 +91,7 @@ def build(url, contexts):
     calculo para cada nivel de contexto."""
     base = None
     mem_by_ctx = {}
+    moe_by_ctx = {}
 
     for ctx in contexts:
         print("  consultando contexto %6d ..." % ctx, end="", flush=True)
@@ -100,6 +101,11 @@ def build(url, contexts):
         if base is None:
             base = {m["name"]: m for m in models}
         mem_by_ctx[ctx] = {m["name"]: m.get("memory_required_gb")
+                           for m in models}
+        # En los MoE, memory_required_gb es solo la parte que va a la VRAM
+        # (los expertos activos); el resto queda en RAM del sistema. Sin este
+        # segundo numero, un DeepSeek-R1 de 671B parece pedir 1,6 GB.
+        moe_by_ctx[ctx] = {m["name"]: m.get("moe_offloaded_gb")
                            for m in models}
 
     rows, skipped = [], 0
@@ -130,6 +136,7 @@ def build(url, contexts):
             # 'quality' no depende de la VRAM, asi que sigue siendo valido
             # sea cual sea el hardware que elija el usuario.
             round((m.get("score_components") or {}).get("quality") or 0, 1),
+            [round(moe_by_ctx[c].get(name) or 0, 3) or None for c in contexts],
         ])
 
     if skipped:

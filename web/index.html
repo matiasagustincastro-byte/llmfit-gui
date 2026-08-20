@@ -351,6 +351,10 @@ function classify(m) {
 
   if (!onGPU) {
     const mode = (m.run_mode || "").toLowerCase();
+    // moe_offload no es "solo CPU": los expertos activos corren en la GPU y
+    // los inactivos quedan en RAM. El plan es hibrido a proposito, y por eso
+    // memory_required_gb es chico — la otra mitad esta en moe_offloaded_gb.
+    if (mode === "moe_offload") return { cls: "warn", icon: "◑", txt: "MoE híbrido" };
     return mode === "cpu_offload"
       ? { cls: "warn", icon: "◐", txt: "CPU offload" }
       : { cls: "bad", icon: "○", txt: "Solo CPU" };
@@ -430,6 +434,7 @@ function renderTable() {
       <td class="num">${m.parameter_count || "—"}</td>
       <td><span class="tag">${m.best_quant || "—"}</span></td>
       <td class="num">${gb(m.memory_required_gb)}
+          ${m.moe_offloaded_gb ? `<div class="prov" title="expertos inactivos: van a la RAM del sistema, no a la VRAM">+ ${n1(m.moe_offloaded_gb)} GB RAM</div>` : ""}
           <div class="meter"><i style="width:${Math.min(100, pct)}%;background:${barCol}"></i></div></td>
       <td class="num">${n1(tps)}${m.measured_tps != null ? " *" : ""}</td>
       <td class="num">${(m.effective_context_length || 0).toLocaleString("es")}</td>
@@ -477,7 +482,7 @@ async function selectModel(m) {
     <div class="st ${s.cls}" style="font-size:15px">${s.icon} ${s.txt} — ${m.run_mode_label || m.run_mode}</div>
 
     <div class="kv">
-      <div><div class="lbl">VRAM requerida</div><div class="v">${gb(m.memory_required_gb)}</div></div>
+      <div><div class="lbl">${m.moe_offloaded_gb ? "VRAM (expertos activos)" : "VRAM requerida"}</div><div class="v">${gb(m.memory_required_gb)}</div></div>
       <div><div class="lbl">Disponible</div><div class="v">${gb(m.memory_available_gb)}</div></div>
       <div><div class="lbl">Velocidad</div><div class="v">${tpsLine}</div></div>
       <div><div class="lbl">Utilización</div><div class="v">${n1(m.utilization_pct)} %</div></div>
@@ -486,6 +491,15 @@ async function selectModel(m) {
       <div><div class="lbl">Contexto usable</div><div class="v">${(m.usable_context || 0).toLocaleString("es")}</div></div>
       <div><div class="lbl">Licencia</div><div class="v">${m.license || "—"}</div></div>
     </div>
+
+    ${m.moe_offloaded_gb ? `<h3 class="sec">Modelo MoE — la memoria va partida</h3>
+      <div class="row"><span>expertos activos, en VRAM</span><b>${gb(m.memory_required_gb)}</b></div>
+      <div class="row"><span>expertos inactivos, en RAM</span><b>${gb(m.moe_offloaded_gb)}</b></div>
+      <div class="row"><span>total a tener cargado</span><b>${gb(m.total_memory_gb)}</b></div>
+      <ul class="notes"><li>La columna de VRAM de la tabla muestra solo la
+        primera cifra, que es lo que llmfit necesita en la placa. Los expertos
+        inactivos igual tienen que estar en la RAM del sistema: en total son
+        <b>${gb(m.total_memory_gb)}</b>, no ${gb(m.memory_required_gb)}.</li></ul>` : ""}
 
     <h3 class="sec">Cómo se calculó la velocidad</h3>
     <div class="row"><span>método</span><b>${m.estimate_basis?.method || "—"}</b></div>
@@ -593,7 +607,8 @@ function exportCSV() {
 
   const bud = budgetGB();
   const head = ["estado", "modelo", "proveedor", "parametros_b", "cuantizacion",
-    "vram_requerida_gb", "vram_disponible_gb", "utilizacion_pct",
+    "vram_requerida_gb", "moe_ram_offload_gb", "memoria_total_gb",
+    "vram_disponible_gb", "utilizacion_pct",
     "tok_s", "tok_s_es_medido", "contexto_efectivo", "contexto_usable",
     "contexto_maximo", "runtime", "modo_ejecucion", "score", "calidad",
     "disco_gb", "categoria", "caso_de_uso", "licencia", "moe", "capacidades"];
@@ -602,7 +617,8 @@ function exportCSV() {
     const s = classify(m);
     return [
       s.txt, m.name, m.provider, m.params_b, m.best_quant,
-      m.memory_required_gb, m.memory_available_gb, m.utilization_pct,
+      m.memory_required_gb, m.moe_offloaded_gb, m.total_memory_gb,
+      m.memory_available_gb, m.utilization_pct,
       m.measured_tps != null ? m.measured_tps : m.estimated_tps,
       m.measured_tps != null ? "si" : "no",
       m.effective_context_length, m.usable_context, m.context_length,

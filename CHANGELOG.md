@@ -17,6 +17,44 @@ uv run build_standalone.py            # regenera llmfit-standalone.html
 
 ---
 
+## [0.2.3] — 2026-08-20
+
+Los modelos MoE mostraban solo la mitad de su memoria.
+
+### Corregido
+
+- **La memoria de un MoE va partida y ahora se ve entera.** llmfit planifica
+  estos modelos en híbrido —expertos activos en VRAM, inactivos en la RAM del
+  sistema— y devuelve las dos cifras: `memory_required_gb` y
+  `moe_offloaded_gb`. La app mostraba solo la primera, así que
+  `unsloth/DeepSeek-R1-GGUF` (671B) figuraba pidiendo **1,64 GB** cuando en
+  realidad hay que tener cargados **16,35 GB**. Afectaba a 604 modelos de los
+  8159 embebidos.
+  - La tabla agrega `+ N GB RAM` bajo la cifra de VRAM.
+  - El panel lateral suma la sección «Modelo MoE — la memoria va partida», con
+    activos en VRAM, inactivos en RAM y total.
+  - El HTML autónomo embebe `moe_offloaded_gb` por nivel de contexto (columna
+    nueva en cada fila) y el resumen aclara cuántos de los que entran
+    «exigen RAM aparte».
+  - El CSV de las dos interfaces suma las columnas `moe_ram_offload_gb` y
+    `memoria_total_gb`.
+- **`moe_offload` ya no se muestra como «Solo CPU».** Era el `else` del
+  clasificador de la app con servidor: 862 modelos MoE caían ahí. Ahora dicen
+  **«MoE híbrido»**, que es lo que llmfit informa en `run_mode`.
+- En el HTML autónomo, un MoE que entra en la VRAM se marca **«MoE + RAM»** en
+  vez de «entra holgado»: entra en la placa, pero solo si además tenés esa RAM
+  libre, y este archivo no conoce la RAM del equipo.
+
+### Sin reportar upstream
+
+- Se investigó como posible bug de llmfit y **no lo es**: está reportado y
+  cerrado en [AlexsJones/llmfit#230](https://github.com/AlexsJones/llmfit/issues/230).
+  El mantenedor explicó que el puntaje evalúa los dos pools por separado a
+  propósito y que lo que faltaba era exponer `moe_offloaded_gb`, agregado en
+  su #235. El campo estaba: quien no lo mostraba era esta app.
+
+---
+
 ## [0.2.2] — 2026-08-20
 
 Correcciones al catálogo en las placas de portátil, y el bug de llmfit
@@ -162,6 +200,7 @@ Primera versión.
 - Lanzadores `run.sh`, `LLM-Fit.bat` e `instalar-acceso-directo.ps1`.
 - Interfaz en español, sin build ni dependencias JS.
 
+[0.2.3]: https://github.com/matiasagustincastro-byte/llmfit-gui/releases/tag/v0.2.3
 [0.2.2]: https://github.com/matiasagustincastro-byte/llmfit-gui/releases/tag/v0.2.2
 [0.2.1]: https://github.com/matiasagustincastro-byte/llmfit-gui/releases/tag/v0.2.1
 [0.2.0]: https://github.com/matiasagustincastro-byte/llmfit-gui/releases/tag/v0.2.0

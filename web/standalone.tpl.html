@@ -127,7 +127,12 @@
 
 // Índices de columna dentro de cada fila de DATA (formato compacto).
 const N=0, PROV=1, PARAMS=2, QUANT=3, DISK=4, CTXMAX=5, CAT=6, USE=7,
-      LIC=8, MOE=9, CAPS=10, MEM=11, QUAL=12;
+      LIC=8, MOE=9, CAPS=10, MEM=11, QUAL=12, MOEOFF=13;
+
+// En un MoE, MEM es solo la parte que llmfit pone en la VRAM (los expertos
+// activos) y MOEOFF es la que queda en la RAM del sistema. Mostrar la
+// primera sola hace que un DeepSeek-R1 de 671B parezca pedir 1,6 GB.
+const moeRam = (r, ci) => (r[MOEOFF] && r[MOEOFF][ci]) || 0;
 
 // Eficiencia del roofline que usa llmfit (estimate_basis.efficiency).
 const EFF = 0.55;
@@ -217,10 +222,14 @@ function applyGPU() {
 // --------------------------------------------------------------------------
 // Cálculo
 // --------------------------------------------------------------------------
-function verdict(need, vram) {
+function verdict(need, vram, ram) {
   if (need == null) return { cls: "bad", icon: "✕", txt: "sin dato", rank: 4 };
   const u = need / vram;
   if (u > 1)   return { cls: "bad",  icon: "✕", txt: "No entra",     rank: 3 };
+  // El plan de un MoE es híbrido a propósito: entra en la placa, pero solo
+  // si además tenés esa RAM libre. Decir "entra holgado" a secas sería
+  // prometer algo que depende de una memoria que este HTML no conoce.
+  if (ram)     return { cls: "warn", icon: "◑", txt: "MoE + RAM",    rank: 2 };
   if (u > 0.9) return { cls: "warn", icon: "◐", txt: "Justo",        rank: 2 };
   if (u > 0.75)return { cls: "good", icon: "●", txt: "Entra",        rank: 1 };
   return         { cls: "ok",   icon: "●", txt: "Entra holgado", rank: 0 };
@@ -249,10 +258,11 @@ function currentRows() {
     if (onlyTools && !(r[CAPS] || []).includes("tool_use")) continue;
     if (term && !(r[N] + " " + r[PROV] + " " + r[USE]).toLowerCase().includes(term)) continue;
 
-    const v = verdict(need, vram);
+    const ram = moeRam(r, ci);
+    const v = verdict(need, vram, ram);
     if (mode === "fit" && v.rank >= 3) continue;
     if (mode === "tight" && v.rank !== 2) continue;
-    out.push({ r, need, v, t: tps(r[DISK], bw) });
+    out.push({ r, need, ram, v, t: tps(r[DISK], bw) });
   }
 
   const key = SORT.col;
@@ -275,14 +285,15 @@ function currentRows() {
 // Resumen sobre el catálogo entero: solo depende de VRAM y contexto, no de
 // los filtros de búsqueda, para que el número no cambie al escribir.
 function stats(vram, ci) {
-  let fits = 0, biggest = 0;
+  let fits = 0, biggest = 0, moe = 0;
   for (const r of DATA) {
     const need = r[MEM][ci];
     if (need == null || need > vram) continue;
     fits++;
+    if (moeRam(r, ci)) moe++;          // entran, pero pidiendo RAM aparte
     if (r[PARAMS] > biggest) biggest = r[PARAMS];
   }
-  return { fits, biggest };
+  return { fits, biggest, moe };
 }
 
 function render() {
@@ -291,13 +302,14 @@ function render() {
   const rows = currentRows();
   const lim = +$("lim").value;
   const shown = rows.slice(0, lim);
-  const { fits, biggest } = stats(vram, ci);
+  const { fits, biggest, moe } = stats(vram, ci);
 
   $("sum").innerHTML = `
     <div class="cell"><div class="lbl">Presupuesto</div>
       <div class="val">${vram.toFixed(1)} <span class="u">GB VRAM</span></div></div>
     <div class="cell"><div class="lbl">Modelos que entran</div>
-      <div class="val">${fits.toLocaleString("es")} <span class="u">de ${META.count.toLocaleString("es")}</span></div></div>
+      <div class="val">${fits.toLocaleString("es")} <span class="u">de ${META.count.toLocaleString("es")}</span></div>
+      ${moe ? `<div class="lbl" style="margin:5px 0 0" title="modelos MoE: entran en la placa pero además exigen RAM del sistema">${moe.toLocaleString("es")} exigen RAM aparte</div>` : ""}</div>
     <div class="cell"><div class="lbl">El más grande que entra</div>
       <div class="val">${biggest ? biggest.toFixed(0) : "—"} <span class="u">B parámetros</span></div></div>
     <div class="cell"><div class="lbl">Contexto</div>
@@ -309,7 +321,7 @@ function render() {
     return;
   }
 
-  const body = shown.map(({ r, need, v, t }) => {
+  const body = shown.map(({ r, need, ram, v, t }) => {
     const pct = Math.min(100, need / vram * 100);
     const col = pct > 100 ? "var(--bad)" : pct > 90 ? "var(--warn)" : "var(--ok)";
     return `<tr>
@@ -319,6 +331,7 @@ function render() {
       <td class="num">${r[PARAMS]}B</td>
       <td><span class="tag">${r[QUANT] || "—"}</span></td>
       <td class="num">${gb(need)}
+        ${ram ? `<div class="prov" title="expertos inactivos: van a la RAM del sistema, no a la VRAM">+ ${ram.toFixed(1)} GB RAM</div>` : ""}
         <div class="meter"><i style="width:${Math.min(100, pct)}%;background:${col}"></i></div></td>
       <td class="num">${t ? t.toFixed(0) : "—"}</td>
       <td class="num">${(r[CTXMAX] || 0).toLocaleString("es")}</td>
@@ -374,13 +387,13 @@ function exportCSV() {
   const bw = parseFloat($("bw").value) || 0;
 
   const head = ["estado", "modelo", "proveedor", "parametros_b", "cuantizacion",
-    "vram_requerida_gb", "vram_presupuesto_gb", "utilizacion_pct",
+    "vram_requerida_gb", "moe_ram_offload_gb", "vram_presupuesto_gb", "utilizacion_pct",
     "tok_s_aprox", "contexto_evaluado", "contexto_maximo", "categoria",
     "caso_de_uso", "calidad", "disco_gb", "licencia", "moe", "capacidades"];
 
-  const body = rows.map(({ r, need, v, t }) => [
+  const body = rows.map(({ r, need, ram, v, t }) => [
     v.txt, r[N], r[PROV], r[PARAMS], r[QUANT],
-    need, vram, vram ? (need / vram * 100).toFixed(1) : "",
+    need, ram || "", vram, vram ? (need / vram * 100).toFixed(1) : "",
     t ? t.toFixed(1) : "", ctxTokens, r[CTXMAX], r[CAT],
     r[USE], r[QUAL], r[DISK], r[LIC], r[MOE] ? "si" : "no",
     (r[CAPS] || []).join(" "),
