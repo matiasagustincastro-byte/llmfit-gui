@@ -100,6 +100,14 @@ reportado upstream.
   placa de portátil hereda el ancho de banda de la de escritorio homónima. A
   una RTX 5070 Laptop le asigna 672 GB/s, imposibles en un bus de 128 bits, e
   infla los tok/s hasta 1,8× en la línea móvil de las series 30, 40 y 50.
+  El mantenedor confirmó el diagnóstico y pidió el arreglo:
+  [PR #922](https://github.com/AlexsJones/llmfit/pull/922) detecta el marcador
+  de portátil (`laptop`, `mobile`, `max-q`) antes de la cadena de comparaciones
+  y devuelve `None`, con lo que llmfit cae en su constante fija en vez de en la
+  cifra de la placa de escritorio. `estimate_vram_from_name()` lleva el mismo
+  guard: cae en la estimación genérica por familia. Verificado en esta máquina:
+  `llmfit system --json` ahora informa `memory_bandwidth_gbps: null` donde decía
+  672.
 
 ---
 
