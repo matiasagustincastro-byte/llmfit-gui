@@ -17,6 +17,41 @@ uv run build_standalone.py            # regenera llmfit-standalone.html
 
 ---
 
+## [0.2.2] — 2026-08-20
+
+Correcciones al catálogo en las placas de portátil, y el bug de llmfit
+reportado upstream.
+
+### Corregido
+
+- **Anchos de banda equivocados en las RTX 50 y 30 de portátil**, verificados
+  contra el VBIOS que publica TechPowerUp y las fichas de los fabricantes:
+  - RTX 5070 Laptop: 448 → **384 GB/s** (128 bits a 24 Gbps; el VBIOS reporta
+    1500 MHz de memoria, no 1750).
+  - RTX 5060 Laptop: 448 → **384 GB/s**.
+  - RTX 5080 Laptop: 768 → **896 GB/s** (256 bits a 28 Gbps).
+  - RTX 3070 Ti Laptop: 512 → **448 GB/s**.
+- Se agrega la **RTX 5070 Laptop de 12 GB** (mayo de 2026, mismos 384 GB/s: el
+  bus sigue siendo de 128 bits, los módulos son de 3 GB).
+
+### Agregado
+
+- El encabezado de `gpus.py` documenta las dos trampas de las placas de
+  portátil: comparten nombre con una de escritorio pero no el bus de memoria,
+  y el mismo modelo cambia de velocidad según el TGP que le puso el fabricante
+  del equipo (una RTX 3070 Ti Laptop va de 384 a 448 GB/s). Se lista la
+  versión de plena potencia.
+
+### Reportado upstream
+
+- [AlexsJones/llmfit#919](https://github.com/AlexsJones/llmfit/issues/919):
+  `gpu_memory_bandwidth_gbps()` compara solo el número de modelo, así que toda
+  placa de portátil hereda el ancho de banda de la de escritorio homónima. A
+  una RTX 5070 Laptop le asigna 672 GB/s, imposibles en un bus de 128 bits, e
+  infla los tok/s hasta 1,8× en la línea móvil de las series 30, 40 y 50.
+
+---
+
 ## [0.2.1] — 2026-08-20
 
 Fidelidad de los datos de hardware: cada cifra de GPU dice de dónde sale.
@@ -127,6 +162,7 @@ Primera versión.
 - Lanzadores `run.sh`, `LLM-Fit.bat` e `instalar-acceso-directo.ps1`.
 - Interfaz en español, sin build ni dependencias JS.
 
+[0.2.2]: https://github.com/matiasagustincastro-byte/llmfit-gui/releases/tag/v0.2.2
 [0.2.1]: https://github.com/matiasagustincastro-byte/llmfit-gui/releases/tag/v0.2.1
 [0.2.0]: https://github.com/matiasagustincastro-byte/llmfit-gui/releases/tag/v0.2.0
 [0.1.0]: https://github.com/matiasagustincastro-byte/llmfit-gui/releases/tag/v0.1.0

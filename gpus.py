@@ -21,6 +21,17 @@ resultado (GDDR5 vs GDDR6, PCIe vs SXM, 8 GB vs 16 GB) van como filas
 separadas. En modulos multi-GPU (A16, K80) la fila describe **una** GPU del
 modulo, que es lo que ve el runtime.
 
+Dos advertencias sobre las placas de portatil:
+
+1. Comparten el nombre con una de escritorio pero no el bus de memoria. Una
+   RTX 5070 Laptop tiene 128 bits contra los 192 de la de escritorio: 384
+   GB/s contra 672. Confundirlas infla los tok/s hasta 1,8x, que es
+   exactamente el bug que arrastra llmfit
+   (https://github.com/AlexsJones/llmfit/issues/919).
+2. El mismo modelo cambia de velocidad segun el TGP que le puso el
+   fabricante del equipo: una RTX 3070 Ti Laptop va de 384 a 448 GB/s entre
+   la version de 105 W y la de 150 W. Aca se lista la de plena potencia.
+
 Formato: lista plana de tuplas (nombre, vram_gb, ancho_gbps). Las filas con
 vram None son titulos de seccion; con eso alcanza para armar los <optgroup>
 de la interfaz sin duplicar la estructura.
@@ -50,10 +61,11 @@ GPUS = [
 
     ("--- GeForce RTX 50 - Blackwell (portatil) ---", None, None),
     ("RTX 5090 Laptop (24 GB)", 24, 896),
-    ("RTX 5080 Laptop (16 GB)", 16, 768),
+    ("RTX 5080 Laptop (16 GB)", 16, 896),
     ("RTX 5070 Ti Laptop (12 GB)", 12, 672),
-    ("RTX 5070 Laptop (8 GB)", 8, 448),
-    ("RTX 5060 Laptop (8 GB)", 8, 448),
+    ("RTX 5070 Laptop (12 GB)", 12, 384),
+    ("RTX 5070 Laptop (8 GB)", 8, 384),
+    ("RTX 5060 Laptop (8 GB)", 8, 384),
     ("RTX 5050 Laptop (8 GB)", 8, 384),
 
     ("--- GeForce RTX 40 - Ada (escritorio) ---", None, None),
@@ -94,7 +106,7 @@ GPUS = [
     ("RTX 3080 Ti Laptop (16 GB)", 16, 512),
     ("RTX 3080 Laptop 16 GB", 16, 448),
     ("RTX 3080 Laptop 8 GB", 8, 448),
-    ("RTX 3070 Ti Laptop (8 GB)", 8, 512),
+    ("RTX 3070 Ti Laptop (8 GB)", 8, 448),
     ("RTX 3070 Laptop (8 GB)", 8, 448),
     ("RTX 3060 Laptop (6 GB)", 6, 336),
     ("RTX 3050 Ti Laptop (4 GB)", 4, 192),
