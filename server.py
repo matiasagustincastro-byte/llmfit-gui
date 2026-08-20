@@ -58,6 +58,50 @@ def embedded_ui():
         return None
     return base64.b64decode(EMBEDDED_UI_B64)
 
+
+# Catalogo de placas. Mismo mecanismo que la UI: gpus.py en disco manda, y
+# `--unico` deja su codigo embebido para cuando el archivo no viaja. Se
+# embebe el modulo entero, no solo la tabla, porque su busqueda por nombre
+# es la que le pone ancho de banda a la placa que detecta nvidia-smi.
+EMBEDDED_GPUS_B64 = ""  # __GPUS_EMBEBIDOS__
+
+_gpus = None
+
+
+def gpus_mod():
+    """Modulo gpus, o None si no esta ni en disco ni embebido."""
+    global _gpus
+    if _gpus is None:
+        _gpus = False
+        try:
+            sys.path.insert(0, BASE_DIR)
+            import gpus as m
+            _gpus = m
+        except ImportError:
+            if EMBEDDED_GPUS_B64:
+                import types
+                m = types.ModuleType("gpus")
+                src = base64.b64decode(EMBEDDED_GPUS_B64).decode("utf-8")
+                exec(compile(src, "gpus.py", "exec"), m.__dict__)
+                _gpus = m
+    return _gpus or None
+
+
+def gpu_catalog():
+    """Lista de (nombre, vram_gb, ancho_gbps). Vacia si no hay catalogo."""
+    m = gpus_mod()
+    return m.GPUS if m else []
+
+
+def catalog_lookup(nombre, vram_gb=None):
+    """Le pone ancho de banda a una placa detectada. None si no la reconoce."""
+    m = gpus_mod()
+    try:
+        return m.buscar(nombre, vram_gb) if m else None
+    except Exception:
+        return None
+
+
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 
 
@@ -344,6 +388,13 @@ def read_gpu(max_age=2.0):
             source = name
             break
 
+    # nvidia-smi y rocm-smi no informan ancho de banda, y es el numero que
+    # decide la velocidad. Lo saca el catalogo a partir del nombre.
+    for g in gpus or []:
+        fila = catalog_lookup(g.get("name"), g.get("total_gb"))
+        g["catalog_name"] = fila[0] if fila else None
+        g["bandwidth_gbps"] = fila[2] if fila else None
+
     data = {"gpus": gpus or [], "available": bool(gpus), "source": source}
 
     with _gpu_lock:
@@ -441,6 +492,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/gpu":
             self._send(200, read_gpu())
+        elif path == "/api/gpu-catalog":
+            self._send(200, {"gpus": gpu_catalog()})
         elif path == "/api/status":
             self._send(200, {"llmfit": llmfit_healthy(), "llmfit_url": LLMFIT_URL})
         elif path.startswith("/llmfit/"):
@@ -568,9 +621,11 @@ def main():
     gpu = read_gpu()
     if gpu["available"]:
         for g in gpu["gpus"]:
-            print("[gpu] %s - %.2f GB libres de %.2f GB (%s%s)"
+            print("[gpu] %s - %.2f GB libres de %.2f GB (%s%s%s)"
                   % (g["name"], g["free_gb"] or 0, g["total_gb"], gpu["source"],
-                     ", memoria unificada" if g.get("unified") else ""))
+                     ", memoria unificada" if g.get("unified") else "",
+                     ", %d GB/s" % g["bandwidth_gbps"]
+                     if g.get("bandwidth_gbps") else ""))
     else:
         print("[gpu] sin telemetria (no hay nvidia-smi / rocm-smi):")
         print("      se usa la VRAM total que reporta llmfit")

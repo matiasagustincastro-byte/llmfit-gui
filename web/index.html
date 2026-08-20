@@ -50,6 +50,8 @@
   select:focus,input:focus{border-color:var(--acc)}
   input[type=number]{width:100px;font-family:var(--mono)}
   #q{width:230px}
+  #gpuq{width:250px;font-size:12px;padding:5px 8px}
+  #preset{width:250px}
   button{background:var(--acc);color:#04121f;border:0;padding:8px 15px;border-radius:6px;
     font-weight:650;font-size:13px;cursor:pointer;font-family:var(--sans)}
   button:hover{filter:brightness(1.12)}
@@ -121,10 +123,14 @@
     <select id="budget">
       <option value="free">VRAM libre ahora (real)</option>
       <option value="total" selected>VRAM total de la GPU</option>
+      <option value="preset">Simular otra placa…</option>
       <option value="manual">Manual…</option>
     </select></div>
   <div class="f" id="wrap-manual" style="display:none"><label>GB</label>
-    <input type="number" id="vram" min="1" max="512" step="0.5" value="8"></div>
+    <input type="number" id="vram" min="1" max="1024" step="0.5" value="8"></div>
+  <div class="f" id="wrap-preset" style="display:none"><label>Placa</label>
+    <input id="gpuq" placeholder="filtrar: 4090, h100, a6000…">
+    <select id="preset"></select></div>
   <div class="f"><label>Contexto</label>
     <select id="ctx">
       <option value="">Por defecto (8K)</option>
@@ -191,10 +197,79 @@ let SELECTED = null;
 function budgetGB() {
   const mode = $("budget").value;
   if (mode === "manual") return parseFloat($("vram").value) || null;
+  if (mode === "preset") { const p = presetRow(); return p ? p[1] : null; }
   if (mode === "free" && GPU && GPU.gpus.length) return +GPU.gpus[0].free_gb.toFixed(2);
   if (SYS && SYS.gpu_vram_gb) return SYS.gpu_vram_gb;
   if (GPU && GPU.gpus.length) return +GPU.gpus[0].total_gb.toFixed(2);
   return null;
+}
+
+// --------------------------------------------------------------------------
+// Catalogo de placas (/api/gpu-catalog, generado por gpus.py)
+//
+// Sirve para responder "¿y si tuviera una H200?" sin tenerla: se le pasa a
+// llmfit la VRAM de esa placa. Ojo: llmfit no acepta un ancho de banda
+// arbitrario, asi que los tok/s que devuelve siguen siendo los del hardware
+// real de este equipo. La interfaz lo aclara donde corresponde.
+// --------------------------------------------------------------------------
+let CATALOG = [];    // [nombre, vram_gb, ancho_gbps]; vram null = titulo
+
+function presetRow() {
+  const v = $("preset").value;
+  return v === "" ? null : CATALOG[+v] || null;
+}
+
+function fillPresets(filtro) {
+  const sel = $("preset");
+  const previo = sel.value;
+  const f = (filtro || "").trim().toLowerCase();
+  sel.innerHTML = "";
+
+  let titulo = null, grupo = null, n = 0;
+  CATALOG.forEach((fila, i) => {
+    const [nombre, vram, bw] = fila;
+    if (vram == null) {                       // titulo de seccion
+      titulo = nombre.replace(/^[-\s]+|[-\s]+$/g, "");
+      grupo = null;
+      return;
+    }
+    if (f && !nombre.toLowerCase().includes(f)) return;
+    if (!grupo) {                             // recien al primer hijo visible
+      grupo = document.createElement("optgroup");
+      grupo.label = titulo || "Otras";
+      sel.appendChild(grupo);
+    }
+    grupo.appendChild(new Option(`${nombre} · ${bw} GB/s`, i));
+    n++;
+  });
+
+  if (!n) {
+    const o = new Option("sin coincidencias", "");
+    o.disabled = true;
+    sel.appendChild(o);
+    return;
+  }
+  // Mantener la eleccion si sobrevivio al filtro.
+  sel.value = previo;
+  if (!sel.value) sel.selectedIndex = 0;
+}
+
+async function loadCatalog() {
+  try {
+    CATALOG = (await (await fetch("/api/gpu-catalog")).json()).gpus || [];
+  } catch (e) { CATALOG = []; }
+
+  if (!CATALOG.length) {                      // sin gpus.py no hay que simular
+    $("budget").querySelector('option[value="preset"]').remove();
+    return;
+  }
+  fillPresets();
+  // Arrancar en la placa detectada, si el catalogo la conoce.
+  const det = GPU && GPU.gpus.length ? GPU.gpus[0].catalog_name : null;
+  if (det) {
+    const i = CATALOG.findIndex(f => f[0] === det);
+    if (i >= 0) $("preset").value = i;
+  }
 }
 
 // --------------------------------------------------------------------------
@@ -212,31 +287,36 @@ function renderGPU() {
   const g = GPU && GPU.gpus.length ? GPU.gpus[0] : null;
   const bud = budgetGB();
 
-  if (!g && !SYS) { box.innerHTML = ""; return; }
+  const sim = $("budget").value === "preset" ? presetRow() : null;
+
+  if (!g && !SYS && !sim) { box.innerHTML = ""; return; }
 
   // Sin telemetría del vendor caemos a lo que reporta llmfit (sin uso en vivo).
-  const name  = g ? g.name  : (SYS ? SYS.gpu_name : "GPU desconocida");
-  const total = g ? g.total_gb : (SYS ? SYS.gpu_vram_gb : 0);
-  const used  = g ? g.used_gb  : null;
-  const free  = g ? g.free_gb  : null;
+  // Con una placa simulada, esa placa reemplaza a la real en la tira.
+  const name  = sim ? sim[0] : (g ? g.name : (SYS ? SYS.gpu_name : "GPU desconocida"));
+  const total = sim ? sim[1] : (g ? g.total_gb : (SYS ? SYS.gpu_vram_gb : 0));
+  const used  = sim ? null : (g ? g.used_gb : null);
+  const free  = sim ? sim[1] : (g ? g.free_gb : null);
   const unified = g ? g.unified : (SYS ? SYS.unified_memory : false);
   const src = GPU && GPU.source ? GPU.source : null;
+  const bw = sim ? sim[2] : (g ? g.bandwidth_gbps : null);
 
   const pUsed = total ? Math.min(100, (used || 0) / total * 100) : 0;
   const pBud  = total ? Math.max(0, Math.min(100 - pUsed, ((bud || 0) / total * 100))) : 0;
 
   box.innerHTML = `
     <div class="cell">
-      <div class="lbl">GPU${g ? "" : " (sin telemetría en vivo)"}</div>
+      <div class="lbl">${sim ? "GPU simulada" : "GPU" + (g ? "" : " (sin telemetría en vivo)")}</div>
       <div class="val">${name}</div>
       <div class="bar"><i class="used" style="width:${pUsed}%"></i>
                        <i class="budget" style="width:${pBud}%"></i></div>
-      <div class="sub">${used != null ? `en uso ${used.toFixed(2)} GB · ` : ""}presupuesto ${gb(bud)} de ${gb(total)}</div>
+      <div class="sub">${used != null ? `en uso ${used.toFixed(2)} GB · ` : ""}presupuesto ${gb(bud)} de ${gb(total)}${bw ? " · " + bw + " GB/s" : ""}</div>
     </div>
     <div class="cell">
-      <div class="lbl">${unified ? "Memoria unificada libre" : "VRAM libre"}</div>
+      <div class="lbl">${sim ? "VRAM simulada" : (unified ? "Memoria unificada libre" : "VRAM libre")}</div>
       <div class="val">${free != null ? free.toFixed(2) : (total || 0).toFixed(2)} <span class="u">GB</span></div>
-      <div class="sub">${src ? src + " · en vivo" : "estimado por llmfit"}</div>
+      <div class="sub">${sim ? "los tok/s siguen siendo los de tu hardware"
+                             : (src ? src + " · en vivo" : "estimado por llmfit")}</div>
     </div>
     <div class="cell">
       <div class="lbl">Uso / Temp</div>
@@ -501,7 +581,9 @@ function exportCSV() {
     ];
   });
 
-  const gpuName = (GPU && GPU.gpus.length) ? GPU.gpus[0].name
+  const sim = $("budget").value === "preset" ? presetRow() : null;
+  const gpuName = sim ? sim[0]
+                  : (GPU && GPU.gpus.length) ? GPU.gpus[0].name
                   : (SYS ? SYS.gpu_name : "gpu");
   const ctx = $("ctx").value ? ($("ctx").value / 1024) + "K" : "auto";
   const fecha = new Date().toISOString().slice(0, 10);
@@ -515,9 +597,13 @@ function exportCSV() {
 // --------------------------------------------------------------------------
 $("csv").onclick = exportCSV;
 $("budget").onchange = () => {
-  $("wrap-manual").style.display = $("budget").value === "manual" ? "flex" : "none";
+  const modo = $("budget").value;
+  $("wrap-manual").style.display = modo === "manual" ? "flex" : "none";
+  $("wrap-preset").style.display = modo === "preset" ? "flex" : "none";
   renderGPU(); load();
 };
+$("gpuq").addEventListener("input", () => fillPresets($("gpuq").value));
+$("preset").addEventListener("change", () => { renderGPU(); load(); });
 $("go").onclick = load;
 $("reset").onclick = () => {
   $("q").value = ""; $("rt").value = ""; $("uc").value = "";
@@ -531,6 +617,7 @@ $("q").addEventListener("keydown", e => { if (e.key === "Enter") load(); });
 
 (async function init() {
   await pollGPU();
+  await loadCatalog();
   setInterval(pollGPU, 3000);
   try {
     const st = await (await fetch("/api/status")).json();

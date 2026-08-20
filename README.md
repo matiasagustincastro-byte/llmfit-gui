@@ -43,8 +43,13 @@ es donde está el mérito.
    ejecución (GPU / offload / solo CPU) con su tok/s, y cuánta VRAM ahorrás
    cuantizando el KV cache (fp8, q8_0, q4_0).
 4. **Exportar a CSV** lo que estés viendo, respetando los filtros.
-5. **Versión sin conexión**: un HTML de 1,4 MB que anda con doble clic.
-6. Interfaz en español, sin build ni dependencias JS.
+5. **Simular otra placa**: catálogo de 247 GPUs — toda la línea NVIDIA
+   (GeForce RTX 50/40/30/20, GTX 16/10/900, RTX PRO y RTX/Quadro de estación de
+   trabajo, centro de datos B300/B200/GB200/H200/H100/A100/L40S/V100/T4, Jetson),
+   más AMD, Intel Arc, Apple Silicon y solo-CPU. Sirve para responder «¿y si
+   tuviera una H200?» antes de comprarla.
+6. **Versión sin conexión**: un HTML de 1,4 MB que anda con doble clic.
+7. Interfaz en español, sin build ni dependencias JS.
 
 ---
 
@@ -209,8 +214,8 @@ No es una decisión de diseño, son tres paredes reales:
    `navigator.deviceMemory` además viene capado por antifingerprinting (dice
    32 GB en una máquina de 64 GB) y `adapter.info` de WebGPU viene vacío.
 
-Por eso elegís la GPU de una lista de ~45 modelos con su VRAM y ancho de banda,
-o cargás los valores a mano.
+Por eso elegís la GPU de una lista de 247 placas (`gpus.py`) con su VRAM y
+ancho de banda, o cargás los valores a mano.
 
 ### Qué precomputa y qué aproxima
 
@@ -269,7 +274,8 @@ navegador  ──►  server.py (:8080)  ──►  llmfit serve (:8787)
 
 | Ruta | Qué devuelve |
 |---|---|
-| `GET /api/gpu` | telemetría en vivo por GPU (cacheada 2 s) |
+| `GET /api/gpu` | telemetría en vivo por GPU (cacheada 2 s), con el ancho de banda que le pone `gpus.py` |
+| `GET /api/gpu-catalog` | el catálogo de placas para el selector «simular otra placa» |
 | `GET /api/status` | si el backend llmfit responde |
 | `GET /llmfit/*` | proxy a la API de llmfit |
 | `POST /llmfit/*` | idem, para `/api/v1/plan` |
@@ -297,6 +303,8 @@ llmfit-gui.py                LA APP EN UN ARCHIVO (generado, se versiona)
 server.py                    servidor local + telemetría GPU + proxy
                              (cabecera PEP 723: declara llmfit para `uv run`)
 web/index.html               la GUI (HTML + CSS + JS, sin dependencias)
+gpus.py                      catálogo de placas: VRAM y ancho de banda
+                             (lo comparten la app con servidor y el HTML)
 run.sh                       lanzador Linux / macOS
 LLM-Fit.bat                  lanzador Windows
 instalar-acceso-directo.ps1  crea los .lnk de escritorio y menú Inicio
@@ -305,10 +313,12 @@ build_standalone.py          generador de la versión sin conexión
 web/standalone.tpl.html      su template
 
 preparar-bundle.py           arma los ZIP y el archivo único
+
+CHANGELOG.md                 qué cambió en cada versión
 ```
 
-`llmfit-gui.py` se genera a partir de `server.py` + `web/index.html`. Si tocás
-alguno de los dos:
+`llmfit-gui.py` se genera a partir de `server.py` + `web/index.html` +
+`gpus.py`. Si tocás alguno de los tres:
 
 ```bash
 python preparar-bundle.py --unico
@@ -322,7 +332,10 @@ Para desarrollar conviene `uv run server.py`, que no hay que regenerar.
 
 - Los tok/s son **estimaciones** del modelo de roofline de llmfit, no
   benchmarks. Los medidos aparecen con `*`. Para medir de verdad: `llmfit bench`.
-- El catálogo se actualiza con `llmfit update`.
+- El catálogo de modelos se actualiza con `llmfit update`. El de placas es
+  `gpus.py`: agregar una es una línea `("Nombre (N GB)", vram_gb, ancho_gbps)`.
+  Las cifras son las nominales del fabricante; lo que manda la velocidad es el
+  ancho de banda, no los TFLOPS.
 - Todo corre en `127.0.0.1`. llmfit no hace tráfico de red salvo que se lo pidas
   explícitamente (descargas, leaderboard).
 

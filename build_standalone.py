@@ -43,38 +43,13 @@ import urllib.request
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CONTEXTS = [2048, 4096, 8192, 16384, 32768, 65536, 131072]
 
-# Catalogo de hardware: VRAM en GB y ancho de banda de memoria en GB/s.
-# El ancho de banda es lo que gobierna la velocidad de inferencia.
-GPUS = [
-    ("--- NVIDIA escritorio ---", None, None),
-    ("RTX 5090 (32 GB)", 32, 1792), ("RTX 5080 (16 GB)", 16, 960),
-    ("RTX 5070 Ti (16 GB)", 16, 896), ("RTX 5070 (12 GB)", 12, 672),
-    ("RTX 4090 (24 GB)", 24, 1008), ("RTX 4080 Super (16 GB)", 16, 736),
-    ("RTX 4070 Ti Super (16 GB)", 16, 672), ("RTX 4070 (12 GB)", 12, 504),
-    ("RTX 4060 Ti (16 GB)", 16, 288), ("RTX 4060 (8 GB)", 8, 272),
-    ("RTX 3090 / Ti (24 GB)", 24, 936), ("RTX 3080 (10 GB)", 10, 760),
-    ("RTX 3070 (8 GB)", 8, 448), ("RTX 3060 (12 GB)", 12, 360),
-    ("--- NVIDIA portatil ---", None, None),
-    ("RTX 5070 Laptop (8 GB)", 8, 672), ("RTX 4090 Laptop (16 GB)", 16, 576),
-    ("RTX 4080 Laptop (12 GB)", 12, 432), ("RTX 4070 Laptop (8 GB)", 8, 256),
-    ("RTX 4060 Laptop (8 GB)", 8, 256), ("RTX 3060 Laptop (6 GB)", 6, 336),
-    ("--- NVIDIA centro de datos ---", None, None),
-    ("H100 (80 GB)", 80, 3350), ("A100 (80 GB)", 80, 2039),
-    ("A100 (40 GB)", 40, 1555), ("L40S (48 GB)", 48, 864),
-    ("--- AMD ---", None, None),
-    ("RX 7900 XTX (24 GB)", 24, 960), ("RX 7900 XT (20 GB)", 20, 800),
-    ("RX 7800 XT (16 GB)", 16, 624), ("RX 7600 (8 GB)", 8, 288),
-    ("MI300X (192 GB)", 192, 5300),
-    ("--- Apple Silicon (memoria unificada) ---", None, None),
-    ("M4 Max (48 GB)", 48, 546), ("M4 Pro (24 GB)", 24, 273),
-    ("M4 (16 GB)", 16, 120), ("M3 Max (48 GB)", 48, 400),
-    ("M3 Pro (18 GB)", 18, 150), ("M2 Ultra (96 GB)", 96, 800),
-    ("M2 Max (32 GB)", 32, 400), ("M2 Pro (16 GB)", 16, 200),
-    ("M1 Max (32 GB)", 32, 400), ("M1 Pro (16 GB)", 16, 200),
-    ("--- Sin GPU ---", None, None),
-    ("Solo CPU, RAM DDR5 (32 GB)", 32, 80),
-    ("Solo CPU, RAM DDR4 (32 GB)", 32, 50),
-]
+# Catalogo de hardware (VRAM y ancho de banda). Vive en gpus.py para que la
+# app con servidor y el HTML autonomo ofrezcan exactamente la misma lista.
+sys.path.insert(0, BASE_DIR)
+try:
+    from gpus import GPUS
+except ImportError:
+    sys.exit("[!!] falta gpus.py junto a build_standalone.py")
 
 
 # --------------------------------------------------------------------------

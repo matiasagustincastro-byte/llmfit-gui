@@ -45,7 +45,7 @@ PLATAFORMAS = {
 
 # Lo que va al ZIP siempre.
 FUENTES = [
-    "llmfit-gui.py", "server.py", "run.sh", "LLM-Fit.bat",
+    "llmfit-gui.py", "server.py", "gpus.py", "run.sh", "LLM-Fit.bat",
     "instalar-acceso-directo.ps1", "build_standalone.py",
     "README.md", "LICENSE",
     os.path.join("web", "index.html"),
@@ -150,21 +150,25 @@ def bajar_binario(urls, fragmento, destino_dir):
 
 
 def generar_unico(salida):
-    """Funde server.py + web/index.html en un solo .py ejecutable.
+    """Funde server.py + web/index.html + gpus.py en un solo .py ejecutable.
 
-    El HTML va en base64 para no pelearse con comillas ni escapes. server.py
-    prefiere web/index.html si existe en disco, asi que el archivo generado
-    tambien sirve dentro del proyecto durante el desarrollo.
+    Los dos archivos embebidos van en base64 para no pelearse con comillas ni
+    escapes. server.py prefiere las copias en disco si existen, asi que el
+    archivo generado tambien sirve dentro del proyecto durante el desarrollo.
     """
     src = io_open(os.path.join(BASE_DIR, "server.py"))
-    html = open(os.path.join(BASE_DIR, "web", "index.html"), "rb").read()
-    b64 = base64.b64encode(html).decode("ascii")
-
-    marcador = 'EMBEDDED_UI_B64 = ""  # __UI_EMBEBIDA__'
-    if marcador not in src:
-        sys.exit("[!!] no se encontro el marcador __UI_EMBEBIDA__ en server.py")
-
-    nuevo = src.replace(marcador, 'EMBEDDED_UI_B64 = "%s"' % b64, 1)
+    nuevo = src
+    for marcador, variable, origen in (
+            ('EMBEDDED_UI_B64 = ""  # __UI_EMBEBIDA__',
+             "EMBEDDED_UI_B64", os.path.join(BASE_DIR, "web", "index.html")),
+            ('EMBEDDED_GPUS_B64 = ""  # __GPUS_EMBEBIDOS__',
+             "EMBEDDED_GPUS_B64", os.path.join(BASE_DIR, "gpus.py"))):
+        if marcador not in nuevo:
+            sys.exit("[!!] no se encontro el marcador de %s en server.py"
+                     % variable)
+        with open(origen, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("ascii")
+        nuevo = nuevo.replace(marcador, '%s = "%s"' % (variable, b64), 1)
 
     # Shebang de uv: en Linux/macOS el archivo queda ejecutable directo
     # (./llmfit-gui.py) y uv resuelve Python y llmfit solo. No afecta a

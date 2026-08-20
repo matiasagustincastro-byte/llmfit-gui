@@ -36,6 +36,8 @@
   select:focus,input:focus{border-color:var(--acc)}
   input[type=number]{width:95px;font-family:var(--mono)}
   #q{width:210px}
+  #gpuq{width:230px;font-size:12px;padding:5px 8px}
+  #gpu{max-width:290px}
   button{background:var(--acc);color:#04121f;border:0;padding:8px 15px;border-radius:6px;
     font-weight:650;font-size:13px;cursor:pointer}
   button.ghost{background:transparent;border:1px solid var(--line);color:var(--dim)}
@@ -90,9 +92,11 @@
 </div>
 
 <div class="ctrl">
-  <div class="f"><label>Tu GPU</label><select id="gpu"></select></div>
-  <div class="f"><label>VRAM (GB)</label><input type="number" id="vram" min="1" max="512" step="0.5"></div>
-  <div class="f"><label>Ancho de banda (GB/s)</label><input type="number" id="bw" min="10" max="8000" step="10"></div>
+  <div class="f"><label>Tu GPU</label>
+    <input id="gpuq" placeholder="filtrar: 4090, h100, a6000…">
+    <select id="gpu"></select></div>
+  <div class="f"><label>VRAM (GB)</label><input type="number" id="vram" min="1" max="1024" step="0.5"></div>
+  <div class="f"><label>Ancho de banda (GB/s)</label><input type="number" id="bw" min="10" max="20000" step="10"></div>
   <div class="f"><label>Contexto</label><select id="ctx"></select></div>
   <div class="f"><label>Mostrar</label>
     <select id="fit">
@@ -135,21 +139,48 @@ let SORT = { col: "qual", dir: -1 };   // mejor calidad primero
 // --------------------------------------------------------------------------
 // Poblar controles a partir de los datos embebidos
 // --------------------------------------------------------------------------
-(function initControls() {
+// El catálogo pasa las 200 placas, así que el <select> se arma por secciones
+// y con un filtro de texto encima: sin eso, encontrar la propia placa en la
+// lista es peor que tipear los dos números a mano.
+function fillGPUs(filtro) {
   const g = $("gpu");
+  const previo = g.value;
+  const f = (filtro || "").trim().toLowerCase();
+  g.innerHTML = "";
+
+  let titulo = null, grupo = null, n = 0;
   GPUS.forEach(([name, vram, bw], i) => {
-    const o = document.createElement("option");
-    o.value = i; o.textContent = name;
-    if (vram == null) { o.disabled = true; o.style.color = "#5f7189"; }
-    g.appendChild(o);
+    if (vram == null) {                        // título de sección
+      titulo = name.replace(/^[-\s]+|[-\s]+$/g, "");
+      grupo = null;
+      return;
+    }
+    if (f && !name.toLowerCase().includes(f)) return;
+    if (!grupo) {                              // recién al primer hijo visible
+      grupo = document.createElement("optgroup");
+      grupo.label = titulo || "Otras";
+      g.appendChild(grupo);
+    }
+    grupo.appendChild(new Option(name + " · " + bw + " GB/s", i));
+    n++;
   });
-  const man = document.createElement("option");
-  man.value = "manual"; man.textContent = "Otra / manual…";
+
+  const man = new Option("Otra / manual…", "manual");
   g.appendChild(man);
 
-  // Primer preset real como valor inicial.
-  const first = GPUS.findIndex(x => x[1] != null);
-  g.value = first;
+  g.value = previo;                            // conservar si sobrevivió
+  if (!g.value) g.value = n ? g.querySelector("optgroup option").value : "manual";
+}
+
+(function initControls() {
+  fillGPUs();
+  $("gpuq").addEventListener("input", () => {
+    const antes = $("gpu").value;
+    fillGPUs($("gpuq").value);
+    // Si el filtro dejo afuera a la placa elegida, la que entra
+    // en su lugar tiene que arrastrar sus numeros.
+    if ($("gpu").value !== antes) { applyGPU(); render(); }
+  });
   applyGPU();
 
   const c = $("ctx");
